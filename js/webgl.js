@@ -1,9 +1,11 @@
 const SHADER_PATHS = {
   vertex: "shaders/fullscreen.vert",
   fragment: "shaders/schwarzschild.frag",
+  orbitalStation: "shaders/orbital_station.glsl",
 };
 
 const SKY_TEXTURE_PATH = "assets/galaxy_4k.jpg";
+const ORBITAL_STATION_MARKER = "/*__ORBITAL_STATION_GLSL__*/";
 
 function shaderTypeName(gl, type) {
   return type === gl.VERTEX_SHADER ? "vertex" : "fragment";
@@ -92,10 +94,21 @@ export class SchwarzschildRenderer {
     }
 
     onProgress("Loading standalone GLSL shaders…");
-    const [vertexSource, fragmentSource] = await Promise.all([
+    const [vertexSource, fragmentTemplate, orbitalStationSource] = await Promise.all([
       fetchText(SHADER_PATHS.vertex),
       fetchText(SHADER_PATHS.fragment),
+      fetchText(SHADER_PATHS.orbitalStation),
     ]);
+    const markerCount = fragmentTemplate.split(ORBITAL_STATION_MARKER).length - 1;
+    if (markerCount !== 1) {
+      throw new Error(
+        `Expected exactly one ${ORBITAL_STATION_MARKER} marker in the fragment shader; found ${markerCount}.`,
+      );
+    }
+    const fragmentSource = fragmentTemplate.replace(
+      ORBITAL_STATION_MARKER,
+      orbitalStationSource,
+    );
 
     const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
     const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
@@ -139,7 +152,7 @@ export class SchwarzschildRenderer {
       "uGridVisible",
       "uSpheresVisible",
       "uSkyVisible",
-      "uTracksVisible",
+      "uRingsVisible",
       "uGridBrightness",
       "uShellCount",
       "uExposure",
@@ -218,7 +231,7 @@ export class SchwarzschildRenderer {
     gl.uniform1i(u.uGridVisible, settings.gridVisible ? 1 : 0);
     gl.uniform1i(u.uSpheresVisible, settings.spheresVisible ? 1 : 0);
     gl.uniform1i(u.uSkyVisible, settings.skyVisible ? 1 : 0);
-    gl.uniform1i(u.uTracksVisible, settings.tracksVisible ? 1 : 0);
+    gl.uniform1i(u.uRingsVisible, settings.ringsVisible ? 1 : 0);
     gl.uniform1f(u.uGridBrightness, settings.gridBrightness);
     gl.uniform1i(u.uShellCount, settings.shellCount);
     gl.uniform1f(u.uExposure, settings.exposure);

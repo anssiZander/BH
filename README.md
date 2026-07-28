@@ -3,7 +3,8 @@
 A framework-free, real-time WebGL2 visualization of light propagation around a
 nonrotating Schwarzschild black hole. The scene contains no accretion disk:
 everything visible is the lensed sky, shaded spherical reference skins,
-spherical coordinate grids, or optional circular tracks on the equatorial plane.
+spherical coordinate grids, or one optional ray-marched orbital megastructure
+centered on the equatorial photon sphere.
 
 ## Run it
 
@@ -30,15 +31,17 @@ The shader files and local sky texture are loaded with `fetch()`, so opening
 The instrument panel controls RK2 integration quality, base ray step, flight
 speed, field of view, grid brightness, shell count, exposure, saturation, and
 the internal render resolution. Lensing, shaded spheres, spherical grids, the
-sky sphere, and the equatorial tracks can each be disabled independently.
+sky sphere, and the orbital-station structure can each be disabled
+independently. The station control is labeled `Dyson ring` in the interface.
+Sphere skins start disabled so the enclosed station is visible on first load.
 
 ## What the radii mean
 
 The mass is set to `M = 1` with `G = c = 1`. The event horizon is at the
 Schwarzschild areal radius `r = 2M`; rays reaching a small numerical margin
 outside its isotropic-coordinate radius `ρ = M/2` are captured and returned
-black. The highlighted yellow grid and track mark the photon sphere at `r = 3M`, or
-`ρ = (2 + √3)M/2`. It is not the horizon.
+black. The highlighted yellow grid and orbital-station ring share the
+photon-sphere radius `r = 3M`, or `ρ = (2 + √3)M/2`. It is not the horizon.
 
 The apparent black shape is the captured-ray region, commonly called the black
 hole shadow. Its boundary is not a directly rendered solid event-horizon
@@ -68,9 +71,9 @@ budget prevents near-critical rays from stalling the GPU.
 Grid lines are evaluated only where an integrated ray crosses a shell.
 Crossings are solved against each local RK2 ray segment, including both roots
 when a near-tangent segment enters and exits the same sphere. A one-pixel
-coverage fringe smooths exact silhouettes, so sphere, grid, and track edges do
-not form staircase gaps while all distortion still comes from the integrated
-optical paths.
+coverage fringe smooths exact silhouettes, so sphere and grid edges do not form
+staircase gaps while all distortion still comes from the integrated optical
+paths.
 
 The grid pipes use a deliberately limited radial palette: magenta inside the
 photon sphere, yellow at the photon sphere, and cyan outside it. Their rounded
@@ -83,11 +86,24 @@ silhouette shading establish surface direction and depth. Both the inner and
 outer faces are fully opaque. The `Spheres` and `Grids` switches are independent;
 switching `Spheres` off restores the unfilled grid view.
 
-The equatorial reference plane is sampled at ray crossings and contains opaque
-circular tracks in that same three-color palette. The yellow `r = 3M` track is
-the circular null-geodesic threshold: viewed through the optical geometry, it
-marks where the apparent turning behavior changes. The tracks are coordinate
-guides, not orbiting matter.
+One opaque procedural orbital station occupies the equatorial photon sphere at
+areal radius `r = 3M`, corresponding to isotropic radius
+`ρ/M = 1.86602540`. Its fragment-shader scene is a uniform-scale port of the
+active station map from morimea's CC0
+[*\[TAA\] Orbital Megastructure*](https://www.shadertoy.com/view/X33BRn).
+The source ring radius `8` is scaled by `ρphoton / 8`, while its origin and axis
+remain unchanged so the black hole lies at the hub.
+
+The port retains the source's complete CityBlock hull relief, dense procedural
+panel material, edge rails and cross-lattice, four main spokes, central hub,
+ladder struts, communications truss, repeated dishes, material IDs, noise,
+finite-difference normals, ambient occlusion, and directional shadowing. Camera,
+Earth, temporal-antialiasing, FSR, and post-processing passes from the
+Shadertoy are not imported; the existing Schwarzschild camera, lensed sky, and
+tone mapper remain in control. The `Dyson ring` switch disables this complete
+station independently of spheres and grids. Because sphere skins are opaque,
+an enabled skin naturally occludes station geometry behind it; disable
+`Spheres` to inspect the complete structure.
 
 ## Quality and performance
 
@@ -106,7 +122,8 @@ gracefully, and the status display reports when sampled view rays hit the cap.
 - Finite step size and finite escape radius cause small drift in extremely long
   near-critical orbits.
 - Grid emission is an artistic visualization aid and does not model radiative transfer.
-- The equatorial tracks are idealized opaque reference marks, not an accretion disk.
+- The orbital station is an artistic visualization structure, not an accretion
+  disk or a model of self-supporting matter.
 - The sphere skins are visualization surfaces, not physical matter around the hole.
 - Camera motion stops at a numerical guard outside the horizon; there is no
   modeled interior region.

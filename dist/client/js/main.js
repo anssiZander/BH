@@ -45,9 +45,9 @@ const settings = {
   saturation: 1.18,
   lensing: true,
   gridVisible: true,
-  spheresVisible: true,
+  spheresVisible: false,
   skyVisible: true,
-  tracksVisible: true,
+  ringsVisible: true,
 };
 
 let renderer;
@@ -122,12 +122,12 @@ function bindControls() {
   skyVisibleInput.addEventListener("change", updateSkyVisibility);
   updateSkyVisibility();
 
-  const tracksVisibleInput = document.querySelector("#tracksVisibleInput");
-  const updateTracksVisibility = () => {
-    settings.tracksVisible = tracksVisibleInput.checked;
+  const ringsVisibleInput = document.querySelector("#ringsVisibleInput");
+  const updateRingVisibility = () => {
+    settings.ringsVisible = ringsVisibleInput.checked;
   };
-  tracksVisibleInput.addEventListener("change", updateTracksVisibility);
-  updateTracksVisibility();
+  ringsVisibleInput.addEventListener("change", updateRingVisibility);
+  updateRingVisibility();
 
   document.querySelector("#resetButton").addEventListener("click", () => camera?.reset());
   document.querySelector("#hideUiButton").addEventListener("click", toggleUi);
@@ -215,16 +215,66 @@ function smoothstep(edge0, edge1, value) {
   return t * t * (3 - 2 * t);
 }
 
-function probeStepSize(rho, baseStep, gridVisible, shellCount) {
+function probeStepSize(
+  position,
+  baseStep,
+  gridVisible,
+  spheresVisible,
+  ringsVisible,
+  shellCount,
+) {
+  const rho = Math.hypot(...position);
   let rayStep = baseStep * (0.35 + 5.65 * smoothstep(1.2, 18, rho));
   const photonBlend = smoothstep(0, 0.28, Math.abs(rho - PHOTON_RHO));
   rayStep = Math.min(rayStep, 0.016 + (rayStep - 0.016) * photonBlend);
 
-  if (gridVisible && rho > 0.64 && rho < 7.3) {
+  if ((gridVisible || spheresVisible) && rho > 0.64 && rho < 7.3) {
     for (let shell = 0; shell < Math.min(shellCount, SHELL_RADII.length); shell += 1) {
       const shellBlend = smoothstep(0, 0.28, Math.abs(rho - SHELL_RADII[shell]));
       rayStep = Math.min(rayStep, 0.075 + (rayStep - 0.075) * shellBlend);
     }
+  }
+
+  if (ringsVisible) {
+    const cylindricalRadius = Math.hypot(position[0], position[2]);
+    const ringEnvelope = Math.max(
+      Math.abs(cylindricalRadius - PHOTON_RHO) - 0.11,
+      Math.abs(position[1]) - 0.34,
+    );
+    const xSpokeEnvelope = Math.max(
+      Math.abs(position[0]) - 2.03,
+      Math.abs(position[1]) - 0.12,
+      Math.abs(position[2]) - 0.14,
+    );
+    const zSpokeEnvelope = Math.max(
+      Math.abs(position[2]) - 2.03,
+      Math.abs(position[1]) - 0.12,
+      Math.abs(position[0]) - 0.14,
+    );
+    const hubEnvelope = Math.max(
+      cylindricalRadius - 0.34,
+      Math.abs(position[1]) - 0.3,
+    );
+    const mastEnvelope = Math.max(
+      cylindricalRadius - 0.2,
+      Math.abs(position[1] + 0.95) - 0.95,
+    );
+    const stationEnvelope = Math.min(
+      ringEnvelope,
+      xSpokeEnvelope,
+      zSpokeEnvelope,
+      hubEnvelope,
+      mastEnvelope,
+    );
+    const stationBlend = smoothstep(
+      0.025,
+      0.2,
+      Math.max(stationEnvelope, 0),
+    );
+    rayStep = Math.min(
+      rayStep,
+      0.01 + (rayStep - 0.01) * stationBlend,
+    );
   }
   return rayStep;
 }
@@ -252,6 +302,8 @@ function traceProbe(
     baseStep,
     lensing = true,
     gridVisible = true,
+    spheresVisible = false,
+    ringsVisible = false,
     shellCount = SHELL_RADII.length,
   },
 ) {
@@ -297,7 +349,14 @@ function traceProbe(
       return finishProbe("escaped", i, position, direction, false, metrics);
     }
 
-    let step = probeStepSize(rho, baseStep, gridVisible, shellCount);
+    let step = probeStepSize(
+      position,
+      baseStep,
+      gridVisible,
+      spheresVisible,
+      ringsVisible,
+      shellCount,
+    );
     const inwardRate =
       -(position[0] * direction[0] +
         position[1] * direction[1] +
@@ -437,6 +496,8 @@ function probeCriticalRays(now) {
         baseStep: settings.baseStep,
         lensing: true,
         gridVisible: settings.gridVisible,
+        spheresVisible: settings.spheresVisible,
+        ringsVisible: settings.ringsVisible,
         shellCount: settings.shellCount,
       }).state === "capped"
     );
@@ -450,6 +511,8 @@ function runPhysicsSelfCheck() {
     baseStep: 0.09,
     lensing: true,
     gridVisible: true,
+    spheresVisible: false,
+    ringsVisible: false,
     shellCount: SHELL_RADII.length,
   };
   const outward = traceProbe(far, [0, 0, 1], probeOptions);

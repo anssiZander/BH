@@ -1,6 +1,27 @@
-# Galaxy sky texture
+# Asset and reference sources
 
-## `assets/galaxy_4k.jpg`
+## Procedural orbital-station reference
+
+- **Title:** *[TAA] Orbital Megastructure*
+- **Creator:** morimea
+- **Source:** https://www.shadertoy.com/view/X33BRn
+- **License:** CC0 public-domain dedication in the shader source
+- **Use in this project:** The active station object map and procedural material
+  helpers were ported into `shaders/orbital_station.glsl`, with source symbols
+  namespaced for this renderer. The single source-radius-8 station is uniformly
+  scaled by the Schwarzschild photon-sphere radius divided by 8. Its CityBlock
+  greebles, panel shader, edge lattice, hub, four spokes, trusses, dishes,
+  material IDs, noise, normals, ambient occlusion, and directional-shadow
+  method are retained.
+
+No image or texture from the Shadertoy project is bundled or sampled at runtime.
+The original camera, Earth texture, temporal buffers, FSR, and post-processing
+passes are not used. Schwarzschild ray integration, station placement, controls,
+lensed sky, and final tone mapping are specific to this project.
+
+## Galaxy sky texture
+
+### `assets/galaxy_4k.jpg`
 
 - **Title:** *The Milky Way panorama* (image ID `eso0932a`)
 - **Creator / required credit:** `ESO/S. Brunier`
@@ -23,13 +44,42 @@ exception and supplies the credit line above. When the texture is used, keep the
 full credit wording unaltered and present it clearly and visibly to users. Do not
 imply endorsement by ESO or its personnel.
 
-## `assets/social-preview-tracks.png`
+## Social previews
+
+### `assets/social-preview-tracks.png`
 
 Project-owned social preview generated with OpenAI's built-in image-generation
-tool on 28 July 2026. It is not sampled by the WebGL renderer.
+tool on 28 July 2026 for the earlier equatorial-track build. It is retained as
+an unused legacy asset and is not sampled by the WebGL renderer.
 
-## `assets/social-preview-spheres.png`
+### `assets/social-preview-spheres.png`
 
 Project-owned social preview generated with OpenAI's built-in image-generation
 tool on 28 July 2026 to reflect the shaded sphere-skin view. It is not sampled
 by the WebGL renderer.
+
+### `assets/social-preview-dyson-rings.png`
+
+Project-owned social preview generated with OpenAI's built-in image-generation
+tool on 28 July 2026 for the superseded color-coded ring design. It is retained
+as an unused legacy asset and is not sampled by the WebGL renderer.
+
+### `assets/social-preview-orbital-stations.png`
+
+Project-owned 1200 × 630 social preview generated with OpenAI's built-in
+image-generation tool on 28 July 2026 for the neutral orbital-station redesign.
+The prompt requested exactly three concentric flat-faced station bands, exactly
+four modest spokes, dense neutral-metal panels and greebles, a central
+Schwarzschild shadow, stars, and no text, logo, watermark, planet, accretion
+disk, neon, or radius-based color coding. It is retained as an unused legacy
+asset and is not sampled by the WebGL renderer.
+
+### `assets/social-preview-photon-station.png`
+
+Project-owned 1200 × 630 social preview generated with OpenAI's built-in
+image-generation tool on 28 July 2026 from an offscreen frame of the literal
+single-station build. The prompt required exactly one flat, densely greebled
+ring, four radial spokes, a centered black-hole shadow, neutral hull materials,
+sparse service accents, deep space, and no text, logo, watermark, planet,
+accretion disk, neon, extra bands, or radius-based color coding. It is used
+only for Open Graph and Twitter cards and is not sampled by the WebGL renderer.

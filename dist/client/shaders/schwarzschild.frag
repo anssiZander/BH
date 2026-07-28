@@ -19,7 +19,7 @@ uniform bool uLensing;
 uniform bool uGridVisible;
 uniform bool uSpheresVisible;
 uniform bool uSkyVisible;
-uniform bool uTracksVisible;
+uniform bool uRingsVisible;
 uniform float uGridBrightness;
 uniform int uShellCount;
 uniform float uExposure;
@@ -35,17 +35,10 @@ const float CRITICAL_IMPACT = 5.196152422706632;
 const float ESCAPE_RHO = 36.0;
 const int HARD_MAX_STEPS = 896;
 const int SHELL_COUNT = 8;
-const int TRACK_COUNT = 15;
 
 const float SHELL_RADII[SHELL_COUNT] = float[](
     0.93166248, 1.30901699, 1.86602540, 2.39564392,
     2.91421356, 3.93649167, 5.45416346, 6.96410162
-);
-
-const float TRACK_RADII[TRACK_COUNT] = float[](
-    0.72000000, 0.93166248, 1.12000000, 1.30901699, 1.58000000,
-    1.86602540, 2.18000000, 2.39564392, 2.91421356, 3.42000000,
-    3.93649167, 4.75000000, 5.45416346, 6.25000000, 6.96410162
 );
 
 float saturate(float value) {
@@ -74,7 +67,8 @@ vec3 opticalAcceleration(vec3 position, vec3 tangent) {
     return gradient - tangent * dot(tangent, gradient);
 }
 
-float adaptiveStep(float rho) {
+float adaptiveStep(vec3 point) {
+    float rho = length(point);
     float interpolation = smoothstep(1.2, 18.0, rho);
     float rayStep = uBaseStep * mix(0.35, 6.0, interpolation);
 
@@ -90,6 +84,44 @@ float adaptiveStep(float rho) {
             float shellBlend = smoothstep(0.0, 0.28, distanceToShell);
             rayStep = min(rayStep, mix(0.075, rayStep, shellBlend));
         }
+    }
+
+    // The literal source station has one photon-sphere ring, four spokes, a
+    // central hub, and a narrow communications mast. These conservative
+    // envelopes refine all of them without forcing tiny steps through the
+    // otherwise empty bounding sphere.
+    if (uRingsVisible) {
+        float cylindricalRadius = length(point.xz);
+        float ringEnvelope =
+            max(
+                abs(cylindricalRadius - PHOTON_RHO) - 0.11,
+                abs(point.y) - 0.34
+            );
+        float xSpokeEnvelope =
+            max(
+                max(abs(point.x) - 2.03, abs(point.y) - 0.12),
+                abs(point.z) - 0.14
+            );
+        float zSpokeEnvelope =
+            max(
+                max(abs(point.z) - 2.03, abs(point.y) - 0.12),
+                abs(point.x) - 0.14
+            );
+        float hubEnvelope =
+            max(cylindricalRadius - 0.34, abs(point.y) - 0.30);
+        float mastEnvelope =
+            max(
+                cylindricalRadius - 0.20,
+                abs(point.y + 0.95) - 0.95
+            );
+        float stationEnvelope =
+            min(
+                min(ringEnvelope, min(xSpokeEnvelope, zSpokeEnvelope)),
+                min(hubEnvelope, mastEnvelope)
+            );
+        float stationBlend =
+            smoothstep(0.025, 0.20, max(stationEnvelope, 0.0));
+        rayStep = min(rayStep, mix(0.010, rayStep, stationBlend));
     }
     return rayStep;
 }
@@ -298,82 +330,472 @@ bool opaqueSphereBeforeEvent(
     return false;
 }
 
-vec3 trackColor(int index) {
-    if (index < 5) return vec3(1.00, 0.12, 0.58);
-    if (index == 5) return vec3(1.00, 0.72, 0.08);
-    return vec3(0.08, 0.84, 1.00);
+/*__ORBITAL_STATION_GLSL__*/
+
+
+float stationEnvelopeDistance(vec3 point) {
+    float cylindricalRadius = length(point.xz);
+    float ringEnvelope =
+        max(
+            abs(cylindricalRadius - PHOTON_RHO) - 0.11,
+            abs(point.y) - 0.34
+        );
+    float xSpokeEnvelope =
+        stationSdBox(point, vec3(2.03, 0.12, 0.14));
+    float zSpokeEnvelope =
+        stationSdBox(point, vec3(0.14, 0.12, 2.03));
+    float hubEnvelope =
+        max(cylindricalRadius - 0.34, abs(point.y) - 0.30);
+    float mastEnvelope =
+        stationSdBox(
+            point - vec3(0.0, -0.95, 0.0),
+            vec3(0.20, 0.95, 0.20)
+        );
+    return
+        min(
+            min(ringEnvelope, min(xSpokeEnvelope, zSpokeEnvelope)),
+            min(hubEnvelope, mastEnvelope)
+        );
 }
 
-void accumulateTrackPlaneHit(
-    vec3 crossing,
-    inout vec3 objectLight,
-    inout float objectOpacity
-) {
-    float radius = length(crossing.xz);
-    float planeWindow =
-        smoothstep(CAPTURE_RHO + 0.05, 0.76, radius)
-        * (1.0 - smoothstep(6.96, 7.28, radius));
-    if (planeWindow <= 0.0) return;
+float dysonScene(vec3 point) {
+    float envelopeDistance = stationEnvelopeDistance(point);
+    if (envelopeDistance > 0.06) return envelopeDistance;
+    return stationDistanceOnly(point);
+}
 
-    float nearestDistance = 1e10;
-    int nearestTrack = 0;
-    for (int track = 0; track < TRACK_COUNT; ++track) {
-        float distanceToTrack = abs(radius - TRACK_RADII[track]);
-        if (distanceToTrack < nearestDistance) {
-            nearestDistance = distanceToTrack;
-            nearestTrack = track;
+vec3 dysonNormal(vec3 point, float epsilon) {
+    const vec2 tetra = vec2(1.0, -1.0);
+    vec3 normalValue = vec3(0.0);
+    float sampleDistance;
+    uint ignoredMaterial;
+
+    stationScene(
+        point + tetra.xyy * epsilon,
+        sampleDistance,
+        ignoredMaterial
+    );
+    normalValue += tetra.xyy * sampleDistance;
+    stationScene(
+        point + tetra.yyx * epsilon,
+        sampleDistance,
+        ignoredMaterial
+    );
+    normalValue += tetra.yyx * sampleDistance;
+    stationScene(
+        point + tetra.yxy * epsilon,
+        sampleDistance,
+        ignoredMaterial
+    );
+    normalValue += tetra.yxy * sampleDistance;
+    stationScene(
+        point + tetra.xxx * epsilon,
+        sampleDistance,
+        ignoredMaterial
+    );
+    normalValue += tetra.xxx * sampleDistance;
+    return normalValue / max(length(normalValue), 1e-8);
+}
+
+float stationAmbientOcclusion(vec3 point, vec3 normal) {
+    float sourceOffset = 0.0125;
+    float sourceMultiplier = 80.0;
+    float ambient = 1.0;
+    for (int sampleIndex = 0; sampleIndex < 6; ++sampleIndex) {
+        float worldDistance;
+        uint ignoredMaterial;
+        stationScene(
+            point + normal * (sourceOffset * STATION_SCALE),
+            worldDistance,
+            ignoredMaterial
+        );
+        ambient *= saturate(
+            (worldDistance / STATION_SCALE) * sourceMultiplier
+        );
+        sourceOffset *= 2.0;
+        sourceMultiplier *= 0.5;
+    }
+    return saturate(max(0.025, sqrt(ambient)));
+}
+
+float stationSunShadow(
+    vec3 point,
+    vec3 normal,
+    vec3 sunDirection
+) {
+    float shadow = 1.0;
+    float sourceTravel = 0.01;
+    vec3 sourceOrigin =
+        point / STATION_SCALE + normal * 0.002;
+
+    for (int shadowStep = 0; shadowStep < 40; ++shadowStep) {
+        vec3 sourceSample =
+            sourceOrigin + sunDirection * sourceTravel;
+        float worldDistance;
+        uint ignoredMaterial;
+        stationScene(
+            sourceSample * STATION_SCALE,
+            worldDistance,
+            ignoredMaterial
+        );
+        float sourceDistance = worldDistance / STATION_SCALE;
+        shadow *= saturate(sourceDistance * 200.0);
+        if (sourceDistance <= 0.0) break;
+
+        float dx = -fract(sourceSample.x);
+        if (sunDirection.x > 0.0) {
+            dx = fract(-sourceSample.x);
+        }
+        float dz = -fract(sourceSample.z);
+        if (sunDirection.z > 0.0) {
+            dz = fract(-sourceSample.z);
+        }
+        float nearestVoxel =
+            min(
+                fract(dx / sunDirection.x),
+                fract(dz / sunDirection.z)
+            ) + 0.000625;
+        nearestVoxel = max(0.2, nearestVoxel);
+        float sourceAdvance =
+            min(sourceDistance, nearestVoxel);
+        sourceTravel += max(0.005, sourceAdvance);
+        if (sourceTravel > 4.5) break;
+    }
+    return saturate(shadow);
+}
+
+vec3 stationEnvironment(vec3 direction, float lod) {
+    vec3 ray = normalize(direction);
+    vec2 uv = vec2(
+        atan(ray.z, ray.x) / TAU + 0.5,
+        asin(clamp(ray.y, -1.0, 1.0)) / PI + 0.5
+    );
+    return textureLod(uSky, uv, lod).rgb;
+}
+
+vec3 stationSurfaceMaterial(
+    uint materialId,
+    vec3 worldPoint,
+    vec3 normal,
+    vec3 rayDirection,
+    float ambient,
+    float sunShadow
+) {
+    vec3 sourcePoint = worldPoint / STATION_SCALE;
+    vec3 sunDirection = normalize(vec3(0.93, 1.0, 1.0));
+    const vec3 sunColor = vec3(2.58, 2.38, 2.10) * 0.8;
+    const vec3 skyColor = vec3(0.3, 0.45, 0.8) * 0.5;
+    vec3 ambientDirection =
+        normalize(vec3(-6500.0, -6400.0, -3400.0));
+
+    float specular = 0.0;
+    vec3 textureColor = vec3(0.5);
+    if (materialId == STATION_MAT_WALL) {
+        textureColor = vec3(0.5, 0.6, 0.7);
+    } else if (materialId == STATION_MAT_PIPE) {
+        textureColor = vec3(0.15, 0.12, 0.10) * 0.5;
+    } else if (materialId == STATION_MAT_CHROME) {
+        textureColor = vec3(0.01);
+        specular = 1.0;
+    } else if (materialId == STATION_MAT_GLOSSY_ROUGH) {
+        textureColor = vec3(0.5);
+        specular = 0.99;
+    } else if (materialId == STATION_MAT_YELLOW) {
+        textureColor = vec3(0.6, 0.42, 0.05) * 0.755;
+        specular = 0.1;
+    } else if (materialId == STATION_MAT_SIDE_WINDOWS) {
+        vec3 cylindrical = stationCylTransform(sourcePoint);
+        float grid =
+            max(
+                abs(fract(cylindrical.x * 16.0) * 2.0 - 1.0),
+                abs(fract(cylindrical.z * 32.0) * 2.0 - 1.0)
+            );
+        grid = saturate(grid * 5.0 - 4.5);
+        textureColor = vec3(0.5, 0.7, 1.0) * grid;
+        specular = 0.2;
+    } else if (materialId == STATION_MAT_FLOOR) {
+        vec3 cylindrical = stationCylTransform(sourcePoint);
+        vec3 panelNormal;
+        if (length(sourcePoint) > 7.0) {
+            cylindrical.xy *= vec2(16.0, 4.0);
+        }
+        vec4 panel =
+            stationTexPanelsDense(
+                cylindrical.xy * 8.0 * vec2(0.2, 1.2),
+                panelNormal
+            );
+        textureColor = vec3(0.0, 0.02, 0.05);
+        if (length(sourcePoint) > 7.0) {
+            textureColor += panel.aaa * 7.0 - 0.39;
+        } else {
+            textureColor =
+                max(vec3(0.33), textureColor + panel.aaa * 4.0);
+        }
+        textureColor *= vec3(0.96, 0.98, 0.97);
+        specular = panel.w * 0.1;
+        if (abs(normal.y) > 0.9) {
+            textureColor = vec3(0.4);
+        }
+    } else if (materialId == STATION_MAT_DOME) {
+        vec3 cylindrical = stationCylTransform(sourcePoint);
+        textureColor *= vec3(0.91, 0.97, 0.998) * 0.8;
+        float windows =
+            saturate(
+                abs(fract(cylindrical.z * 64.0) - 0.5)
+                    * 16.0
+                - 4.0
+            );
+        specular = windows * 0.2;
+        textureColor *= windows * 0.35 + 0.65;
+    } else if (stationIsMatRgb(materialId)) {
+        textureColor =
+            stationGetMatRgb(materialId) * (1.0 / 255.0);
+    }
+
+    float sourceNoise = 0.0;
+    float doubler = 1.0;
+    for (int octave = 0; octave < 4; ++octave) {
+        sourceNoise +=
+            stationNoise(sourcePoint * 8.0 * doubler)
+            / doubler;
+        doubler *= 2.0;
+    }
+    textureColor *= sourceNoise * 0.25 + 0.75;
+    if (materialId == STATION_MAT_SPOKE) {
+        textureColor = vec3(0.6);
+    }
+
+    vec3 lightColor =
+        sunColor
+        * saturate(dot(sunDirection, normal))
+        * sunShadow;
+    lightColor +=
+        skyColor
+        * saturate(
+            dot(normal, ambientDirection) * 0.5 + 0.5
+        )
+        * pow(ambient, 0.25);
+
+    if (materialId == STATION_MAT_FLOOR) {
+        float emissiveNoise = saturate(sourceNoise - 0.5);
+        float windows =
+            1.0
+            - saturate(
+                abs(fract(sourcePoint.y * 16.0) - 0.5)
+                    * 14.0
+                - 0.9
+            );
+        if (textureColor.x < 0.0001) {
+            textureColor = vec3(0.4) * windows;
+            lightColor +=
+                vec3(0.99, 0.8, 0.35)
+                * 2.0
+                * emissiveNoise;
         }
     }
 
-    float width = mix(0.018, 0.046, smoothstep(0.72, 6.96, radius));
-    float normalizedDistance = nearestDistance / width;
-    float trackMask =
-        (1.0 - smoothstep(1.0, 1.65, normalizedDistance))
-        * planeWindow;
-    float crown =
-        sqrt(max(0.0, 1.0 - min(normalizedDistance, 1.0) * min(normalizedDistance, 1.0)));
+    vec3 reflection = reflect(rayDirection, normalize(normal));
+    vec3 environmentColor;
+    if (materialId == STATION_MAT_GLOSSY_ROUGH) {
+        float sunReflection =
+            pow(
+                max(dot(reflection, sunDirection), 0.0),
+                7.0
+            );
+        float ambientReflection =
+            pow(
+                dot(reflection, ambientDirection) * 0.5 + 0.5,
+                3.0
+            ) * 0.6;
+        environmentColor =
+            sunColor * sunReflection * sunShadow
+            + vec3(70.0, 130.0, 240.0)
+                * (1.0 / 355.0)
+                * ambientReflection;
+    } else {
+        environmentColor =
+            stationEnvironment(reflection, 1.5);
+    }
 
-    // A very faint film establishes the equatorial plane; the circular tracks
-    // themselves remain effectively opaque.
-    float filmAlpha = 0.025 * planeWindow;
-    objectLight +=
-        (1.0 - objectOpacity)
-        * filmAlpha
-        * vec3(0.018, 0.026, 0.045);
-    objectOpacity += (1.0 - objectOpacity) * filmAlpha;
-
-    if (trackMask <= 0.001) return;
-    float trackAlpha = trackMask * mix(0.88, 0.98, crown);
-    vec3 material =
-        trackColor(nearestTrack)
-        * (0.46 + 0.82 * crown)
-        + vec3(0.32) * pow(crown, 12.0);
-    objectLight += (1.0 - objectOpacity) * trackAlpha * material;
-    objectOpacity += (1.0 - objectOpacity) * trackAlpha * 0.96;
+    vec3 litColor = textureColor * lightColor;
+    litColor = mix(litColor, environmentColor, specular);
+    return mix(litColor, vec3(0.07, 0.13, 0.2), 0.08);
 }
 
-void accumulateEquatorialCrossing(
+bool accumulateDysonHit(
+    vec3 hitPoint,
+    vec3 rayDirection,
+    float sceneDistance,
+    float hitEpsilon,
+    inout vec3 structureLight,
+    inout float structureOpacity
+) {
+    if (sceneDistance > hitEpsilon) return false;
+
+    float exactDistance;
+    uint materialId;
+    stationScene(hitPoint, exactDistance, materialId);
+
+    vec3 normal =
+        dysonNormal(
+            hitPoint,
+            max(0.0005 * STATION_SCALE, hitEpsilon * 0.12)
+        );
+    vec3 viewDirection = normalize(-rayDirection);
+    if (dot(normal, viewDirection) < 0.0) normal = -normal;
+
+    float ambientOcclusion =
+        stationAmbientOcclusion(hitPoint, normal);
+    vec3 sunDirection = normalize(vec3(0.93, 1.0, 1.0));
+    float sunShadow =
+        stationSunShadow(hitPoint, normal, sunDirection);
+    vec3 material =
+        stationSurfaceMaterial(
+            materialId,
+            hitPoint,
+            normal,
+            rayDirection,
+            ambientOcclusion,
+            sunShadow
+        );
+
+    structureLight +=
+        (1.0 - structureOpacity) * material;
+    structureOpacity = 1.0;
+    return true;
+}
+
+void accumulateDysonSegment(
     vec3 oldPosition,
     vec3 newPosition,
-    float surfaceOpacity,
-    inout vec3 objectLight,
-    inout float objectOpacity
+    vec3 rayDirection,
+    float sphereOpacity,
+    out float hitT,
+    inout vec3 structureLight,
+    inout float structureOpacity
 ) {
-    if (!uTracksVisible || surfaceOpacity >= 0.999) return;
-    bool crossesPlane =
-        (oldPosition.y > 0.0 && newPosition.y <= 0.0)
-        || (oldPosition.y < 0.0 && newPosition.y >= 0.0);
-    if (!crossesPlane) return;
+    hitT = 2.0;
+    if (
+        !uRingsVisible
+        || structureOpacity >= 0.999
+        || sphereOpacity >= 0.999
+    ) return;
 
-    float denominator = oldPosition.y - newPosition.y;
-    if (abs(denominator) < 1e-8) return;
-    float crossingT = clamp(oldPosition.y / denominator, 0.0, 1.0);
-    if (opaqueSphereBeforeEvent(oldPosition, newPosition, crossingT)) return;
-    accumulateTrackPlaneHit(
-        mix(oldPosition, newPosition, crossingT),
-        objectLight,
-        objectOpacity
-    );
+    vec3 segment = newPosition - oldPosition;
+    float segmentLength = length(segment);
+    if (segmentLength <= 1e-8) return;
+
+    vec3 midpoint = 0.5 * (oldPosition + newPosition);
+    float envelopeMargin = 0.5 * segmentLength + 0.07;
+    if (stationEnvelopeDistance(midpoint) > envelopeMargin) return;
+
+    float rayT = 0.0;
+    for (int probe = 0; probe < 12; ++probe) {
+        if (rayT > 1.0) break;
+        vec3 samplePoint = oldPosition + segment * rayT;
+        float sceneDistance = dysonScene(samplePoint);
+        float pixelWorld =
+            max(
+                0.00025,
+                length(samplePoint - uCameraPosition)
+                * tan(0.5 * uFovY)
+                / max(uResolution.y, 1.0)
+            );
+        float hitEpsilon =
+            clamp(pixelWorld * 0.55, 0.00025, 0.0022);
+        if (sceneDistance <= hitEpsilon) {
+            if (
+                opaqueSphereBeforeEvent(
+                    oldPosition,
+                    newPosition,
+                    rayT
+                )
+            ) return;
+            if (
+                accumulateDysonHit(
+                    samplePoint,
+                    rayDirection,
+                    sceneDistance,
+                    hitEpsilon,
+                    structureLight,
+                    structureOpacity
+                )
+            ) {
+                hitT = rayT;
+                return;
+            }
+        }
+        float advance =
+            clamp(
+                max(sceneDistance - hitEpsilon, 0.0)
+                    * 0.65
+                    / segmentLength,
+                0.085,
+                0.24
+            );
+        rayT += advance;
+    }
+}
+
+void traceFlatDyson(
+    vec3 origin,
+    vec3 tangent,
+    float maximumDistance,
+    out float hitDistance,
+    inout vec3 structureLight,
+    inout float structureOpacity
+) {
+    hitDistance = 1e20;
+    if (!uRingsVisible) return;
+
+    const float boundRadius = 2.05;
+    float projection = dot(origin, tangent);
+    float discriminant =
+        projection * projection
+        - (dot(origin, origin) - boundRadius * boundRadius);
+    if (discriminant < 0.0) return;
+
+    float root = sqrt(discriminant);
+    float travel = max(0.0, -projection - root);
+    float travelEnd =
+        min(maximumDistance, -projection + root);
+    if (travel > travelEnd) return;
+
+    for (int probe = 0; probe < 192; ++probe) {
+        if (travel > travelEnd) break;
+        vec3 samplePoint = origin + tangent * travel;
+        float sceneDistance = dysonScene(samplePoint);
+        float pixelWorld =
+            max(
+                0.00025,
+                travel
+                * tan(0.5 * uFovY)
+                / max(uResolution.y, 1.0)
+            );
+        float hitEpsilon =
+            clamp(pixelWorld * 0.55, 0.00025, 0.0022);
+        if (sceneDistance <= hitEpsilon) {
+            if (opaqueSphereBeforeEvent(origin, samplePoint, 1.0)) return;
+            if (
+                accumulateDysonHit(
+                    samplePoint,
+                    tangent,
+                    sceneDistance,
+                    hitEpsilon,
+                    structureLight,
+                    structureOpacity
+                )
+            ) {
+                hitDistance = travel;
+                return;
+            }
+        }
+        float advance = max(sceneDistance * 0.65, 0.0008);
+        if (stationEnvelopeDistance(samplePoint) < 0.10) {
+            advance = min(advance, 0.012);
+        }
+        travel += advance;
+    }
 }
 
 void accumulateShellCrossings(
@@ -383,7 +805,8 @@ void accumulateShellCrossings(
     inout vec3 gridLight,
     inout float gridOpacity,
     inout vec3 surfaceLight,
-    inout float surfaceOpacity
+    inout float surfaceOpacity,
+    float structureT
 ) {
     bool gridsActive = uGridVisible && uGridBrightness > 0.0;
     if (!gridsActive && !uSpheresVisible) return;
@@ -410,7 +833,11 @@ void accumulateShellCrossings(
             if (firstRoot > 1e-5 && firstRoot <= 1.0 + 1e-5) {
                 vec3 crossing =
                     oldPosition + segment * clamp(firstRoot, 0.0, 1.0);
-                if (gridsActive && surfaceOpacity < 0.999) {
+                if (
+                    gridsActive
+                    && surfaceOpacity < 0.999
+                    && firstRoot < structureT
+                ) {
                     accumulateGridHit(
                         crossing,
                         shell,
@@ -435,7 +862,11 @@ void accumulateShellCrossings(
             ) {
                 vec3 crossing =
                     oldPosition + segment * clamp(secondRoot, 0.0, 1.0);
-                if (gridsActive && surfaceOpacity < 0.999) {
+                if (
+                    gridsActive
+                    && surfaceOpacity < 0.999
+                    && secondRoot < structureT
+                ) {
                     accumulateGridHit(
                         crossing,
                         shell,
@@ -479,7 +910,11 @@ void accumulateShellCrossings(
         float edgeCoverage =
             1.0 - smoothstep(0.0, pixelWorld * 1.25, missDistance);
         if (edgeCoverage <= 0.001) continue;
-        if (gridsActive && surfaceOpacity < 0.999) {
+        if (
+            gridsActive
+            && surfaceOpacity < 0.999
+            && closestT < structureT
+        ) {
             accumulateGridHit(
                 closestPoint,
                 shell,
@@ -506,6 +941,8 @@ void traceFlatScene(
     inout float gridOpacity,
     inout vec3 surfaceLight,
     inout float surfaceOpacity,
+    inout vec3 structureLight,
+    inout float structureOpacity,
     out bool captured
 ) {
     float originProjection = dot(origin, tangent);
@@ -521,6 +958,16 @@ void traceFlatScene(
             horizonDistance = nearHorizon;
         }
     }
+
+    float structureDistance;
+    traceFlatDyson(
+        origin,
+        tangent,
+        horizonDistance,
+        structureDistance,
+        structureLight,
+        structureOpacity
+    );
 
     bool gridsActive = uGridVisible && uGridBrightness > 0.0;
     bool spheresActive = uSpheresVisible;
@@ -538,7 +985,11 @@ void traceFlatScene(
 
             if (nearDistance > 1e-5 && nearDistance < horizonDistance) {
                 vec3 crossing = origin + tangent * nearDistance;
-                if (gridsActive && surfaceOpacity < 0.999) {
+                if (
+                    gridsActive
+                    && surfaceOpacity < 0.999
+                    && nearDistance < structureDistance
+                ) {
                     accumulateGridHit(
                         crossing,
                         shell,
@@ -571,7 +1022,11 @@ void traceFlatScene(
             float farDistance = -originProjection + sqrt(discriminant);
             if (farDistance > 1e-5 && farDistance < horizonDistance) {
                 vec3 crossing = origin + tangent * farDistance;
-                if (gridsActive && surfaceOpacity < 0.999) {
+                if (
+                    gridsActive
+                    && surfaceOpacity < 0.999
+                    && farDistance < structureDistance
+                ) {
                     accumulateGridHit(
                         crossing,
                         shell,
@@ -594,16 +1049,6 @@ void traceFlatScene(
         }
     }
 
-    if (uTracksVisible && surfaceOpacity < 0.999 && abs(tangent.y) > 1e-7) {
-        float planeDistance = -origin.y / tangent.y;
-        if (planeDistance > 1e-5 && planeDistance < horizonDistance) {
-            accumulateTrackPlaneHit(
-                origin + tangent * planeDistance,
-                gridLight,
-                gridOpacity
-            );
-        }
-    }
 }
 
 vec2 directionToEquirectangular(vec3 direction) {
@@ -631,6 +1076,8 @@ void main() {
     float gridOpacity = 0.0;
     vec3 surfaceLight = vec3(0.0);
     float surfaceOpacity = 0.0;
+    vec3 structureLight = vec3(0.0);
+    float structureOpacity = 0.0;
     bool captured = false;
     bool escaped = false;
     bool invalidRay = false;
@@ -643,6 +1090,8 @@ void main() {
             gridOpacity,
             surfaceLight,
             surfaceOpacity,
+            structureLight,
+            structureOpacity,
             captured
         );
         escaped = !captured;
@@ -661,7 +1110,7 @@ void main() {
                 break;
             }
 
-            float rayStep = adaptiveStep(oldRadius);
+            float rayStep = adaptiveStep(position);
             float inwardRate = -dot(normalize(position), tangent);
             if (inwardRate > 0.02) {
                 float safeInfallStep = 0.72 * (oldRadius - CAPTURE_RHO) / inwardRate;
@@ -690,12 +1139,15 @@ void main() {
                 break;
             }
 
-            accumulateEquatorialCrossing(
+            float structureT;
+            accumulateDysonSegment(
                 oldPosition,
                 position,
+                tangent,
                 surfaceOpacity,
-                gridLight,
-                gridOpacity
+                structureT,
+                structureLight,
+                structureOpacity
             );
             accumulateShellCrossings(
                 oldPosition,
@@ -704,8 +1156,13 @@ void main() {
                 gridLight,
                 gridOpacity,
                 surfaceLight,
-                surfaceOpacity
+                surfaceOpacity,
+                structureT
             );
+            if (
+                surfaceOpacity >= 0.999
+                || structureOpacity >= 0.999
+            ) break;
         }
     }
 
@@ -759,6 +1216,8 @@ void main() {
     // Opaque shell material remains visible even when the ray behind it would
     // eventually be captured by the horizon.
     sceneColor = sceneColor * (1.0 - surfaceOpacity) + surfaceLight;
+    sceneColor =
+        sceneColor * (1.0 - structureOpacity) + structureLight;
     sceneColor *= 1.0 - gridOpacity * 0.42;
     sceneColor += gridLight;
     sceneColor = max(sceneColor, vec3(0.0));
