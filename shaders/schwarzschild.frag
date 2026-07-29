@@ -31,8 +31,9 @@ const float TAU = 6.28318530717958647692;
 const float M = 1.0;
 const float CAPTURE_RHO = 0.515;
 const float PHOTON_RHO = 1.8660254037844386;
-const float STATION_BAND_CENTER_LATITUDE = 0.25;
-const float STATION_ENVELOPE_HALF_ANGLE = 0.19;
+const float STATION_INNER_BAND_LATITUDE = 0.1875;
+const float STATION_OUTER_BAND_LATITUDE = 0.5625;
+const float STATION_ENVELOPE_HALF_ANGLE = 0.15;
 const float CRITICAL_IMPACT = 5.196152422706632;
 const float ESCAPE_RHO = 36.0;
 const int HARD_MAX_STEPS = 896;
@@ -56,18 +57,30 @@ float stationBandEnvelope(vec3 point) {
             1.0
         )
     );
-    float angularEnvelope =
+    float innerAngularEnvelope =
         stationRadius
         * sin(
             abs(
                 stationLatitude
-                - STATION_BAND_CENTER_LATITUDE
+                - STATION_INNER_BAND_LATITUDE
+            )
+            - STATION_ENVELOPE_HALF_ANGLE
+        );
+    float outerAngularEnvelope =
+        stationRadius
+        * sin(
+            abs(
+                stationLatitude
+                - STATION_OUTER_BAND_LATITUDE
             )
             - STATION_ENVELOPE_HALF_ANGLE
         );
     float radialEnvelope =
         abs(stationRadius - PHOTON_RHO) - 0.11;
-    return max(radialEnvelope, angularEnvelope);
+    return max(
+        radialEnvelope,
+        min(innerAngularEnvelope, outerAngularEnvelope)
+    );
 }
 
 float opticalIndex(float rho) {
@@ -111,9 +124,9 @@ float adaptiveStep(vec3 point) {
         }
     }
 
-    // The station follows two mirrored spherical latitude bands. This
-    // conservative envelope refines both bands while leaving the equatorial
-    // view corridor and the rest of the bounding sphere empty.
+    // The station follows four mirrored spherical latitude bands. This
+    // conservative envelope refines all four while leaving the equatorial
+    // view corridor and the gaps between adjacent bands empty.
     if (uRingsVisible) {
         float stationEnvelope = stationBandEnvelope(point);
         float stationBlend =

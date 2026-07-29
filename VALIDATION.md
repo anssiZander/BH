@@ -2,8 +2,8 @@
 
 The baseline measurements below were recorded on 28 July 2026. The
 numerical-optics section remains the baseline for the unchanged ray equation.
-The final section records the 29 July 2026 source, geometry, envelope, compile,
-distribution, HTTP, and share-image checks for the twin station-band revision.
+The final section records the 29 July 2026 source, geometry, envelope,
+distribution, HTTP, and share-image checks for the four-band revision.
 
 ## Recorded baseline: runtime and rendering
 
@@ -84,46 +84,47 @@ adaptive step policy.
 - Grid crossings use local segment/sphere roots with tangent coverage; step
   refinement remains active throughout a widened band around every visible shell.
 
-## Twin station-band validation
+## Four station-band validation
 
 The checks in this section were recorded on 29 July 2026 for the curved,
-mirrored station-band revision.
+four-band station revision.
 
 - The active station scene retains the CityBlock hull relief, procedural panels,
-  side windows, edge rails, and cross-lattice, then ends. Static inspection
-  confirms that the active scene no longer calls the source radial cylinders,
-  hub plates, ladder rails, central trusses, mast, or dishes.
+  side windows, and band-edge rails, then ends. Static inspection confirms that
+  the rendered map contains no source cross-lattice pipes, radial cylinders, hub
+  plates, ladder rails, central trusses, mast, or dishes.
 - The folded spherical mapping centers exact geometry and material copies at
-  latitudes `±0.25` radians (`±14.3239°`) on the photon sphere. Each nominal
-  band spans `14.3239°`, with inner edges at `±7.1620°` and outer edges at
-  `±21.4859°`. The resulting nominal equatorial corridor is `14.3239°` wide,
-  or approximately `0.46529M` between inner edges at the photon radius.
-- Both shader and CPU stepping code use the same sine-based angular-cone
-  envelope with a conservative `0.19`-radian half-angle. A deterministic
+  latitudes `±0.1875` and `±0.5625` radians (`±10.7430°` and `±32.2289°`) on
+  the photon sphere. Each nominal band spans `14.3239°`. The four edge ranges
+  are `−39.3908°..−25.0669°`, `−17.9049°..−3.5810°`,
+  `3.5810°..17.9049°`, and `25.0669°..39.3908°`.
+- The nominal equatorial corridor and the two gaps between adjacent bands are
+  all `7.1620°` wide. The equatorial separation is exactly half the preceding
+  two-band revision's `14.3239°` gap.
+- Both shader and CPU stepping code use the same pair of sine-based angular-cone
+  envelopes with a conservative `0.15`-radian half-angle. A deterministic
   100,000-point scan produced zero upper/lower mirror error, no nonfinite
   values, and a maximum central finite-difference gradient norm of
-  `1.0000000105`, within numerical tolerance of the envelope's unit-Lipschitz
-  bound. The equatorial envelope distance at the photon radius is
-  `0.11189436M`, safely outside the exact-station evaluation threshold.
-- The exact runtime marker replacement produced a 67,838-byte fragment shader
+  `1.0000000127`, within numerical tolerance of the envelope's unit-Lipschitz
+  bound. The equatorial and adjacent-gap midpoint envelope distance at the
+  photon radius is `0.0699596M`, outside the exact-station evaluation threshold.
+- The exact runtime marker replacement produced a 67,637-byte fragment shader
   with SHA-256
-  `97a17441963c75deb956f2b33a941b36ccc2d370a53515618a2e305f2670db54`.
-  Chrome 150's ANGLE OpenGL ES 3.0 implementation compiled the vertex and
-  assembled fragment shaders and linked the program successfully with empty
-  compiler and linker logs. A headless WebGL2 startup smoke test also reached
-  `6000×3000 sky loaded · optics stable`.
+  `06ff820de3fba3dd380d61c1bb8e4f7f29f9a000c66886fdc8dbbf00d304fbe0`.
+  Static shader assembly found balanced delimiters, one injection marker, all
+  referenced station functions defined, and no cross-lattice geometry in the
+  active station scene.
 - All three source JavaScript modules and the distribution Worker parse without
-  syntax errors. Static shader assembly found balanced delimiters, one injection
-  marker, all 49 referenced station functions defined, and no off-ring geometry
-  tokens in the active station scene.
-- All 16 source/distribution runtime file pairs are byte-identical. Local HTTP
-  returned `200` for the source and distribution HTML, modules, shaders, sky
-  texture, and new station-band social card.
-- The 1730 × 909 share image was inspected for exactly two curved neutral-metal
-  bands, a centered black-hole shadow, a fully clear equatorial corridor, no
-  radial spokes or center mast, and no text, logo, or watermark.
-- No interactive pointer-lock, resize, or rendered-frame screenshot pass was
-  performed for this revision; none is represented here as a success.
+  syntax errors. All source/distribution runtime file pairs are byte-identical.
+  Local HTTP returned `200` for the source and distribution HTML, modules,
+  shaders, sky texture, and four-band social card.
+- The 1730 × 909 share image was inspected for exactly four curved
+  neutral-metal bands, a centered black-hole shadow, a clear equatorial view,
+  no protruding cross-lattice pipes, no radial spokes or center mast, and no
+  text, logo, or watermark.
+- No interactive pointer-lock, resize, browser shader-compile, or rendered-frame
+  screenshot pass was performed for this revision; none is represented here as
+  a success.
 
 The simulation remains an educational real-time approximation. The thinnest
 critical set can exhaust even the Ultra budget and is handled with a stable,

@@ -3,13 +3,14 @@
  * by morimea, based on WlKXzm, "Orbital Megastructure" by Otavio Good.
  *
  * This file preserves the source ring hull and procedural material helpers,
- * then folds the band over spherical latitude and mirrors it across the
- * equator. The source hub, radial spokes, communications mast, and dishes are
- * intentionally omitted along with camera state, Earth/environment rendering,
- * TAA, FSR, post-processing, and otherwise dead geometry.
+ * then folds two band copies over each hemisphere's spherical latitude and
+ * mirrors them across the equator. The source cross-lattice, hub, radial
+ * spokes, communications mast, and dishes are intentionally omitted from the
+ * rendered scene along with camera state, Earth/environment rendering, TAA,
+ * FSR, post-processing, and otherwise dead geometry.
  *
- * Inclusion contract: PI, PHOTON_RHO, STATION_BAND_CENTER_LATITUDE, and
- * saturate(float) are defined first.
+ * Inclusion contract: PI, PHOTON_RHO, STATION_INNER_BAND_LATITUDE,
+ * STATION_OUTER_BAND_LATITUDE, and saturate(float) are defined first.
  */
 
 const float STATION_SCALE = PHOTON_RHO / 8.0;
@@ -445,13 +446,18 @@ vec3 stationBandTransform(vec3 point) {
     float latitude = asin(
         clamp(point.y / sphereRadius, -1.0, 1.0)
     );
+    float foldedLatitude = abs(latitude);
+    float innerBandOffset =
+        foldedLatitude - STATION_INNER_BAND_LATITUDE;
+    float outerBandOffset =
+        foldedLatitude - STATION_OUTER_BAND_LATITUDE;
+    float nearestBandOffset =
+        abs(innerBandOffset) < abs(outerBandOffset)
+        ? innerBandOffset
+        : outerBandOffset;
     return vec3(
         26.0 * (longitude / PI),
-        sphereRadius
-            * (
-                abs(latitude)
-                - STATION_BAND_CENTER_LATITUDE
-            ),
+        sphereRadius * nearestBandOffset,
         sphereRadius
     );
 }
@@ -896,38 +902,6 @@ void stationDistanceToObjectSource(
             + vec2(-8.0, 1.0)
         ) - ringRadius;
     geometryDistance *= scaleDenominator;
-    stationMatMin(
-        distanceValue,
-        material,
-        geometryDistance,
-        STATION_MAT_SPOKE
-    );
-
-    vec3 rotated =
-        stationFlipX(
-            stationRotateX(cylindrical, PI * 0.25),
-            0.0
-        );
-    float repeatedCoordinate =
-        stationRepeat(rotated.y, 1.414);
-    geometryDistance =
-        length(
-            vec2(rotated.x, repeatedCoordinate)
-            + vec2(-8.0, 0.0)
-        ) - ringRadius;
-    repeatedCoordinate = stationRepeat(rotated.z, 1.414);
-    float secondDistance =
-        length(
-            vec2(rotated.x, repeatedCoordinate)
-            + vec2(-8.0, 0.0)
-        ) - ringRadius;
-    geometryDistance =
-        min(geometryDistance, secondDistance)
-        * scaleDenominator;
-    geometryDistance = max(
-        geometryDistance,
-        abs(length(point) - 8.0625) - 0.125
-    );
     stationMatMin(
         distanceValue,
         material,

@@ -3,7 +3,7 @@
 A framework-free, real-time WebGL2 visualization of light propagation around a
 nonrotating Schwarzschild black hole. The scene contains no accretion disk:
 everything visible is the lensed sky, shaded spherical reference skins,
-spherical coordinate grids, or two optional ray-marched orbital-station bands
+spherical coordinate grids, or four optional ray-marched orbital-station bands
 curved around the photon sphere.
 
 ## Run it
@@ -86,25 +86,27 @@ silhouette shading establish surface direction and depth. Both the inner and
 outer faces are fully opaque. The `Spheres` and `Grids` switches are independent;
 switching `Spheres` off restores the unfilled grid view.
 
-Two opaque procedural station bands curve along the photon sphere at areal
+Four opaque procedural station bands curve along the photon sphere at areal
 radius `r = 3M`, corresponding to isotropic radius `ρ/M = 1.86602540`. Their
 fragment-shader scene adapts the ring map from morimea's CC0
 [*\[TAA\] Orbital Megastructure*](https://www.shadertoy.com/view/X33BRn).
 The source radius `8` is scaled by `ρphoton / 8`. A folded spherical-latitude
-mapping creates exact mirrored copies centered at `±0.25` radians
-(`±14.32°`), each spanning about `14.32°`. This leaves a clear equatorial
-corridor about `14.32°` wide between their inner edges.
+mapping creates exact mirrored copies centered at `±0.1875` and `±0.5625`
+radians (`±10.74°` and `±32.23°`), each spanning about `14.32°`. The clear
+equatorial corridor and both gaps between adjacent bands are each about
+`7.16°` wide.
 
 The adaptation retains the source CityBlock hull relief, dense procedural panel
-material, band-edge rails and cross-lattice, material IDs, noise,
-finite-difference normals, ambient occlusion, and directional shadowing. The
-four center-facing spokes, central hub, ladder struts, communications mast, and
-repeated dishes are omitted. Camera, Earth, temporal-antialiasing, FSR, and
-post-processing passes from the Shadertoy are not imported; the existing
-Schwarzschild camera, lensed sky, and tone mapper remain in control. The
-`Station bands` switch disables both bands independently of spheres and grids.
-Because sphere skins are opaque, an enabled skin naturally occludes station
-geometry behind it; disable `Spheres` to inspect the complete structure.
+material, band-edge rails, material IDs, noise, finite-difference normals,
+ambient occlusion, and directional shadowing. The protruding cross-lattice
+pipes, four center-facing spokes, central hub, ladder struts, communications
+mast, and repeated dishes are omitted. Camera, Earth, temporal-antialiasing,
+FSR, and post-processing passes from the Shadertoy are not imported; the
+existing Schwarzschild camera, lensed sky, and tone mapper remain in control.
+The `Station bands` switch disables all four bands independently of spheres and
+grids. Because sphere skins are opaque, an enabled skin naturally occludes
+station geometry behind it; disable `Spheres` to inspect the complete
+structure.
 
 ## Quality and performance
 

@@ -10,10 +10,11 @@
   helpers were ported into `shaders/orbital_station.glsl`, with source symbols
   namespaced for this renderer. The source-radius-8 ring hull is uniformly
   scaled by the Schwarzschild photon-sphere radius divided by 8, curved along
-  spherical latitude, and mirrored above and below a clear equatorial gap. Its
-  CityBlock greebles, panel shader, edge lattice, material IDs, noise, normals,
-  ambient occlusion, and directional-shadow method are retained. The source
-  hub, four radial spokes, central trusses, mast, and dishes are omitted.
+  spherical latitude, duplicated at two latitudes per hemisphere, and mirrored
+  above and below a clear equatorial gap. Its CityBlock greebles, panel shader,
+  edge rails, material IDs, noise, normals, ambient occlusion, and
+  directional-shadow method are retained. The source cross-lattice pipes, hub,
+  four radial spokes, central trusses, mast, and dishes are omitted.
 
 No image or texture from the Shadertoy project is bundled or sampled at runtime.
 The original camera, Earth texture, temporal buffers, FSR, and post-processing
@@ -94,5 +95,19 @@ neutral greebled panels, gold edge rails, and wide composition while requiring
 exactly two mirrored spherical station bands, one above and one below a fully
 open equatorial corridor. It explicitly prohibited radial spokes, center-facing
 pipes, hub attachments, masts, antennas, dishes, accretion disks, text, logos,
-watermarks, planets, neon radius colors, and any third band. It is used only for
-Open Graph and Twitter cards and is not sampled by the WebGL renderer.
+watermarks, planets, neon radius colors, and any third band. It is retained as
+an unused legacy asset and is not sampled by the WebGL renderer.
+
+### `assets/social-preview-four-bands.png`
+
+Project-owned 1730 × 909 social preview generated with OpenAI's built-in
+image-generation tool on 29 July 2026 by editing the preceding two-band card.
+The prompt preserved the centered black-hole shadow, deep star field, neutral
+greebled panels, gold edge rails, and wide composition while requiring exactly
+four mirrored spherical station bands with two copies per hemisphere. It also
+requested equal edge-to-edge gaps, an unobstructed equatorial view, and removal
+of the large white cross-lattice pipes, radial spokes, hub, mast, antenna, and
+dishes. A second precise edit moved the inner bands toward the equator while
+preserving the four-band count and symmetry. The card contains no text, logo,
+or watermark. It is used only for Open Graph and Twitter cards and is not
+sampled by the WebGL renderer.
