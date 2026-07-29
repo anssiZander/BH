@@ -3,6 +3,10 @@ const RESET_POSITION = new Float32Array([0, 1.35, 13.5]);
 const RESET_YAW = Math.PI;
 const RESET_PITCH = -0.0996687;
 const HORIZON_GUARD = 0.535;
+const MAX_DELTA_SECONDS = 0.05;
+const LOOK_RESPONSE = 24;
+const MOVE_ACCELERATION_RESPONSE = 12;
+const MOVE_DECELERATION_RESPONSE = 30;
 
 function normalize(out, x, y, z) {
   const length = Math.hypot(x, y, z) || 1;
@@ -39,6 +43,11 @@ export class FirstPersonCamera {
     this.up = new Float32Array(3);
     this.yaw = RESET_YAW;
     this.pitch = RESET_PITCH;
+    this.targetYaw = RESET_YAW;
+    this.targetPitch = RESET_PITCH;
+    this.velocity = new Float32Array(3);
+    this.targetVelocity = new Float32Array(3);
+    this.displacement = new Float32Array(3);
     this.speed = 1.4;
     this.sensitivity = 0.00175;
     this.keys = new Set();
@@ -57,6 +66,12 @@ export class FirstPersonCamera {
 
     document.addEventListener("pointerlockchange", () => {
       this.pointerLocked = document.pointerLockElement === this.canvas;
+      if (this.pointerLocked) {
+        this.targetYaw = this.yaw;
+        this.targetPitch = this.pitch;
+      } else {
+        this._cancelMotion();
+      }
       document.body.classList.toggle("pointer-locked", this.pointerLocked);
       document.dispatchEvent(
         new CustomEvent("camera:pointerlock", { detail: { locked: this.pointerLocked } }),
@@ -65,11 +80,14 @@ export class FirstPersonCamera {
 
     document.addEventListener("mousemove", (event) => {
       if (!this.pointerLocked) return;
-      this.yaw -= event.movementX * this.sensitivity;
-      this.pitch -= event.movementY * this.sensitivity;
+      if (!Number.isFinite(event.movementX) || !Number.isFinite(event.movementY)) return;
+      this.targetYaw -= event.movementX * this.sensitivity;
+      this.targetPitch -= event.movementY * this.sensitivity;
       const pitchLimit = Math.PI * 0.495;
-      this.pitch = Math.max(-pitchLimit, Math.min(pitchLimit, this.pitch));
-      this._updateBasis();
+      this.targetPitch = Math.max(
+        -pitchLimit,
+        Math.min(pitchLimit, this.targetPitch),
+      );
     });
 
     window.addEventListener("keydown", (event) => {
@@ -86,7 +104,19 @@ export class FirstPersonCamera {
       this.keys.delete(event.code);
     });
 
-    window.addEventListener("blur", () => this.keys.clear());
+    window.addEventListener("blur", () => this._cancelMotion());
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) this._cancelMotion();
+    });
+  }
+
+  _cancelMotion() {
+    this.keys.clear();
+    this.velocity.fill(0);
+    this.targetVelocity.fill(0);
+    this.displacement.fill(0);
+    this.targetYaw = this.yaw;
+    this.targetPitch = this.pitch;
   }
 
   _updateBasis() {
@@ -120,6 +150,20 @@ export class FirstPersonCamera {
   }
 
   update(deltaSeconds) {
+    const dt = Math.max(
+      0,
+      Math.min(
+        Number.isFinite(deltaSeconds) ? deltaSeconds : 0,
+        MAX_DELTA_SECONDS,
+      ),
+    );
+    if (dt <= 0) return;
+
+    const lookBlend = 1 - Math.exp(-LOOK_RESPONSE * dt);
+    this.yaw += (this.targetYaw - this.yaw) * lookBlend;
+    this.pitch += (this.targetPitch - this.pitch) * lookBlend;
+    this._updateBasis();
+
     let mx = 0;
     let my = 0;
     let mz = 0;
@@ -132,24 +176,45 @@ export class FirstPersonCamera {
     if (this.keys.has("KeyC") || this.keys.has("KeyQ")) my -= 1;
 
     const movementLength = Math.hypot(mx, my, mz);
-    if (movementLength === 0) return;
-
-    mx /= movementLength;
-    my /= movementLength;
-    mz /= movementLength;
+    if (movementLength > 0) {
+      mx /= movementLength;
+      my /= movementLength;
+      mz /= movementLength;
+    }
 
     const boost = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") ? 3.5 : 1;
     const localRadius = Math.hypot(...this.position);
     const horizonSlowdown = Math.max(0.12, Math.min(1, (localRadius - HORIZON_GUARD) * 1.7));
-    const distance = this.speed * boost * horizonSlowdown * Math.min(deltaSeconds, 0.05);
+    const targetSpeed =
+      movementLength > 0
+        ? this.speed * boost * horizonSlowdown
+        : 0;
+    this.targetVelocity[0] =
+      (this.right[0] * mx + WORLD_UP[0] * my + this.forward[0] * mz) * targetSpeed;
+    this.targetVelocity[1] =
+      (this.right[1] * mx + WORLD_UP[1] * my + this.forward[1] * mz) * targetSpeed;
+    this.targetVelocity[2] =
+      (this.right[2] * mx + WORLD_UP[2] * my + this.forward[2] * mz) * targetSpeed;
+    const response =
+      movementLength > 0
+        ? MOVE_ACCELERATION_RESPONSE
+        : MOVE_DECELERATION_RESPONSE;
+    const decay = Math.exp(-response * dt);
+    const integrationScale = (1 - decay) / response;
+    for (let component = 0; component < 3; component += 1) {
+      const oldVelocity = this.velocity[component];
+      const desiredVelocity = this.targetVelocity[component];
+      this.displacement[component] =
+        desiredVelocity * dt
+        + (oldVelocity - desiredVelocity) * integrationScale;
+      this.velocity[component] =
+        desiredVelocity
+        + (oldVelocity - desiredVelocity) * decay;
+    }
 
-    const dx = (this.right[0] * mx + WORLD_UP[0] * my + this.forward[0] * mz) * distance;
-    const dy = (this.right[1] * mx + WORLD_UP[1] * my + this.forward[1] * mz) * distance;
-    const dz = (this.right[2] * mx + WORLD_UP[2] * my + this.forward[2] * mz) * distance;
-
-    let nx = this.position[0] + dx;
-    let ny = this.position[1] + dy;
-    let nz = this.position[2] + dz;
+    let nx = this.position[0] + this.displacement[0];
+    let ny = this.position[1] + this.displacement[1];
+    let nz = this.position[2] + this.displacement[2];
     const newRadius = Math.hypot(nx, ny, nz);
 
     if (newRadius < HORIZON_GUARD) {
@@ -157,6 +222,18 @@ export class FirstPersonCamera {
       nx *= invRadius;
       ny *= invRadius;
       nz *= invRadius;
+      const normalX = nx / HORIZON_GUARD;
+      const normalY = ny / HORIZON_GUARD;
+      const normalZ = nz / HORIZON_GUARD;
+      const radialVelocity =
+        this.velocity[0] * normalX
+        + this.velocity[1] * normalY
+        + this.velocity[2] * normalZ;
+      if (radialVelocity < 0) {
+        this.velocity[0] -= normalX * radialVelocity;
+        this.velocity[1] -= normalY * radialVelocity;
+        this.velocity[2] -= normalZ * radialVelocity;
+      }
     }
 
     this.position[0] = nx;
@@ -168,6 +245,11 @@ export class FirstPersonCamera {
     this.position.set(RESET_POSITION);
     this.yaw = RESET_YAW;
     this.pitch = RESET_PITCH;
+    this.targetYaw = RESET_YAW;
+    this.targetPitch = RESET_PITCH;
+    this.velocity.fill(0);
+    this.targetVelocity.fill(0);
+    this.displacement.fill(0);
     this.keys.clear();
     this._updateBasis();
   }

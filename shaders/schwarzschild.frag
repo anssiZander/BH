@@ -13,6 +13,7 @@ uniform vec3 uCameraForward;
 uniform vec3 uCameraRight;
 uniform vec3 uCameraUp;
 uniform float uTime;
+uniform vec2 uJitter;
 uniform float uFovY;
 uniform int uMaxSteps;
 uniform float uBaseStep;
@@ -463,6 +464,39 @@ vec3 stationEnvironment(vec3 direction, float lod) {
     return textureLod(uSky, uv, lod).rgb;
 }
 
+float stationPeriodicLineAA(
+    float coordinate,
+    float halfWidth
+) {
+    float distanceToLine =
+        abs(fract(coordinate + 0.5) - 0.5);
+    float filterWidth =
+        max(fwidth(coordinate) * 0.75, 1e-4);
+    return
+        1.0
+        - smoothstep(
+            halfWidth - filterWidth,
+            halfWidth + filterWidth,
+            distanceToLine
+        );
+}
+
+float stationPeriodicBandAA(
+    float coordinate,
+    float innerHalfWidth,
+    float outerHalfWidth
+) {
+    float distanceToCenter =
+        abs(fract(coordinate) - 0.5);
+    float filterWidth =
+        max(fwidth(coordinate) * 0.75, 1e-4);
+    return smoothstep(
+        innerHalfWidth - filterWidth,
+        outerHalfWidth + filterWidth,
+        distanceToCenter
+    );
+}
+
 vec3 stationSurfaceMaterial(
     uint materialId,
     vec3 worldPoint,
@@ -500,10 +534,15 @@ vec3 stationSurfaceMaterial(
         vec3 cylindrical = stationBandTransform(sourcePoint);
         float grid =
             max(
-                abs(fract(cylindrical.x * 16.0) * 2.0 - 1.0),
-                abs(fract(cylindrical.z * 32.0) * 2.0 - 1.0)
+                stationPeriodicLineAA(
+                    cylindrical.x * 16.0,
+                    0.05
+                ),
+                stationPeriodicLineAA(
+                    cylindrical.z * 32.0,
+                    0.05
+                )
             );
-        grid = saturate(grid * 5.0 - 4.5);
         textureColor = vec3(0.5, 0.7, 1.0) * grid;
         specular = 0.2;
     } else if (materialId == STATION_MAT_FLOOR) {
@@ -533,10 +572,10 @@ vec3 stationSurfaceMaterial(
         vec3 cylindrical = stationBandTransform(sourcePoint);
         textureColor *= vec3(0.91, 0.97, 0.998) * 0.8;
         float windows =
-            saturate(
-                abs(fract(cylindrical.z * 64.0) - 0.5)
-                    * 16.0
-                - 4.0
+            stationPeriodicBandAA(
+                cylindrical.z * 64.0,
+                0.25,
+                0.3125
             );
         specular = windows * 0.2;
         textureColor *= windows * 0.35 + 0.65;
@@ -548,11 +587,29 @@ vec3 stationSurfaceMaterial(
     float sourceNoise = 0.0;
     vec3 noisePoint = sourcePoint;
     noisePoint.y = abs(noisePoint.y);
+    vec3 baseNoiseFootprint =
+        fwidth(noisePoint) * 8.0;
     float doubler = 1.0;
     for (int octave = 0; octave < 4; ++octave) {
+        float octaveFootprint =
+            max(
+                baseNoiseFootprint.x,
+                max(
+                    baseNoiseFootprint.y,
+                    baseNoiseFootprint.z
+                )
+            ) * doubler;
+        float octaveCoverage =
+            1.0
+            - smoothstep(0.35, 1.0, octaveFootprint);
+        float octaveNoise =
+            mix(
+                0.5,
+                stationNoise(noisePoint * 8.0 * doubler),
+                octaveCoverage
+            );
         sourceNoise +=
-            stationNoise(noisePoint * 8.0 * doubler)
-            / doubler;
+            octaveNoise / doubler;
         doubler *= 2.0;
     }
     textureColor *= sourceNoise * 0.25 + 0.75;
@@ -575,10 +632,10 @@ vec3 stationSurfaceMaterial(
         float emissiveNoise = saturate(sourceNoise - 0.5);
         float windows =
             1.0
-            - saturate(
-                abs(fract(sourcePoint.y * 16.0) - 0.5)
-                    * 14.0
-                - 0.9
+            - stationPeriodicBandAA(
+                sourcePoint.y * 16.0,
+                0.9 / 14.0,
+                1.9 / 14.0
             );
         if (textureColor.x < 0.0001) {
             textureColor = vec3(0.4) * windows;
@@ -1061,10 +1118,15 @@ vec3 adjustSaturation(vec3 color, float saturation) {
 void main() {
     float aspect = uResolution.x / max(uResolution.y, 1.0);
     float focalScale = tan(0.5 * uFovY);
+    vec2 jitteredScreen =
+        vScreen + (2.0 * uJitter / uResolution);
     vec3 tangent = normalize(
         uCameraForward
-        + uCameraRight * vScreen.x * aspect * focalScale
-        + uCameraUp * vScreen.y * focalScale
+        + uCameraRight
+            * jitteredScreen.x
+            * aspect
+            * focalScale
+        + uCameraUp * jitteredScreen.y * focalScale
     );
     vec3 position = uCameraPosition;
     vec3 gridLight = vec3(0.0);

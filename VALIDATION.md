@@ -101,10 +101,10 @@ four-band station revision.
 - The nominal equatorial corridor and the two gaps between adjacent bands are
   all `7.1620°` wide. The equatorial separation is exactly half the preceding
   two-band revision's `14.3239°` gap.
-- A frame-time uniform now drives one shared `0.03`-radian-per-second rotation
+- A frame-time uniform now drives one shared `0.015`-radian-per-second rotation
   about the bands' common polar axis. Static data-flow inspection confirms that
   all four copies pass through the same time-dependent transform. The resulting
-  rotation period is `209.439510` seconds.
+  rotation period is `418.879020` seconds.
 - The distance map and surface-material path both call the same rotating
   source-point helper. The dense gray panel grid, side-window grid, floor
   windows, material noise, and emissive noise therefore remain locked to their
@@ -117,27 +117,55 @@ four-band station revision.
   `1.0000000127`, within numerical tolerance of the envelope's unit-Lipschitz
   bound. The equatorial and adjacent-gap midpoint envelope distance at the
   photon radius is `0.0699596M`, outside the exact-station evaluation threshold.
-- The exact runtime marker replacement produced a 67,880-byte fragment shader
+- The exact runtime marker replacement produced a 70,155-byte fragment shader
   with SHA-256
-  `d881ebc5f9f5397599b52212b3397d11210d4c49a091620c5ce357c262216a5b`.
+  `6a7a1553efdb67628569be3066b274c77c00f8e247c4c83ad099c0cf80b50ce5`.
   Static shader assembly found balanced delimiters, one injection marker, all
   referenced station functions defined, and no cross-lattice geometry in the
   active station scene.
+- The supplied 1130 × 822, 30 FPS recording was sampled at six frames per
+  second. Its large hull and domes remained comparatively stable while dense
+  one-to-three-pixel greebles, panel boundaries, rails, and silhouettes crawled,
+  identifying spatial and temporal undersampling rather than video compression
+  as the dominant artifact.
+- The station panel borders, layered panel density, periodic window grids, and
+  four noise octaves now use screen-space derivative footprints to attenuate
+  detail beyond the pixel Nyquist limit. High quality's render scale increased
+  from `0.68` to `0.86`; Ultra increased from `0.90` to `1.00`.
+- A 6,013-byte FXAA and temporal-resolve shader with SHA-256
+  `0bece8d36f82b622d780e7d3b7484e52cf58676021c4dd6aca7d2f304ef81796`
+  applies contrast-adaptive edge filtering, eight-phase sub-pixel jitter,
+  neighborhood-clamped history, luminance and RGB-relative rejection, and
+  frame-rate-normalized camera-motion rejection. Moving-station history is
+  capped at `0.20`, and gaps above `0.12` seconds invalidate it. Three complete
+  RGBA8 framebuffers passed mocked allocation, ping-pong, resolve, blit,
+  moving-scene cap, long-gap rejection, and settings-invalidation sequencing at
+  the recording's `1130 × 822` display size (`972 × 707` High render target).
+- ANGLE's OpenGL ES 3.0 compiler accepted the exact runtime vertex shader,
+  70,155-byte assembled scene fragment, and 6,013-byte FXAA fragment with empty
+  compile logs. Both runtime programs linked successfully; the FXAA program's
+  link log was empty.
+- Deterministic camera simulations at 30, 60, and 144 Hz produced a maximum
+  one-second movement-position spread of `1.9111 × 10⁻⁶M` and zero look-angle
+  spread. After a 0.25-second input and 0.5-second release, residual speed was
+  `4.0694 × 10⁻⁷M/s`; reset and pointer unlock removed all velocity, held-key,
+  and target-orientation state. Horizon-contact testing remained outside
+  `ρ = 0.535M` and removed inward residual velocity.
 - The telemetry tracker uses one logarithmic areal-radius mapping over
   `2M`–`22M` for both landmarks and the live marker. The horizon evaluates to
   the exact left endpoint (`0%`), while the photon sphere and a live `3M`
   position both evaluate to `16.909208367%`.
 - All three source JavaScript modules and the distribution Worker parse without
-  syntax errors. All source/distribution runtime file pairs are byte-identical.
+  syntax errors. All 18 source/distribution runtime file pairs are
+  byte-identical.
   Local HTTP returned `200` for the source and distribution HTML, modules,
   shaders, sky texture, and four-band social card.
 - The 1730 × 909 share image was inspected for exactly four curved
   neutral-metal bands, a centered black-hole shadow, a clear equatorial view,
   no protruding cross-lattice pipes, no radial spokes or center mast, and no
   text, logo, or watermark.
-- No interactive pointer-lock, resize, browser shader-compile, or rendered-frame
-  screenshot pass was performed for this revision; none is represented here as
-  a success.
+- No interactive browser pointer-lock, resize, or rendered-frame screenshot
+  pass was performed for this revision; none is represented here as a success.
 
 The simulation remains an educational real-time approximation. The thinnest
 critical set can exhaust even the Ultra budget and is handled with a stable,

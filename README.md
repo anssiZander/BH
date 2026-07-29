@@ -95,7 +95,7 @@ mapping creates exact mirrored copies centered at `±0.1875` and `±0.5625`
 radians (`±10.74°` and `±32.23°`), each spanning about `14.32°`. The clear
 equatorial corridor and both gaps between adjacent bands are each about
 `7.16°` wide. All four bands rotate together about their shared polar axis at
-`0.03` radians per second, completing one revolution in about 3.5 minutes. The
+`0.015` radians per second, completing one revolution in about 7 minutes. The
 distance-field geometry and all procedural panel, window, and surface-noise
 coordinates use the same rotating object-space transform.
 
@@ -105,23 +105,36 @@ ambient occlusion, and directional shadowing. The protruding cross-lattice
 pipes, four center-facing spokes, central hub, ladder struts, communications
 mast, and repeated dishes are omitted. Camera, Earth, temporal-antialiasing,
 FSR, and post-processing passes from the Shadertoy are not imported; the
-existing Schwarzschild camera, lensed sky, and tone mapper remain in control.
-The `Station bands` switch disables all four bands independently of spheres and
-grids. Because sphere skins are opaque, an enabled skin naturally occludes
-station geometry behind it; disable `Spheres` to inspect the complete
-structure.
+existing Schwarzschild camera, lensed sky, anti-aliasing pipeline, and tone
+mapper remain in control. The `Station bands` switch disables all four bands
+independently of spheres and grids. Because sphere skins are opaque, an enabled
+skin naturally occludes station geometry behind it; disable `Spheres` to
+inspect the complete structure.
 
 The live areal-radius tracker uses a logarithmic `2M`–`22M` scale. Its horizon
 notch is the left endpoint at `2M`, while the photon-sphere notch and live
 camera marker are both positioned by the same scale function, so they coincide
 at `3M`.
 
+Dense station detail is band-limited with screen-space derivative filtering.
+Each frame is rendered through FXAA and an eight-phase sub-pixel jitter
+sequence, then combined with a short neighborhood-clamped history. Luminance
+and color change reject stale samples, camera-motion rejection is normalized by
+frame time, and temporal influence is capped at 20% while the station rotates.
+History is cleared after frame stalls as well as on resize, quality or
+display-setting changes, camera reset, and tab visibility changes.
+
+Keyboard movement eases toward and away from its target velocity, while mouse
+look eases toward a target orientation. Both use frame-rate-independent
+exponential responses; reset, focus loss, and pointer-lock transitions cancel
+residual motion safely.
+
 ## Quality and performance
 
-`High` is the default and uses 416 RK2 steps with a 68% internal render scale.
+`High` is the default and uses 416 RK2 steps with an 86% internal render scale.
 It targets smooth real-time interaction at 1080p on an RTX 4070-class GPU.
 `Low` and `Medium` reduce both ray budget and pixel count. `Ultra` raises the
-budget to 896 steps and a 90% internal render scale; it is intended for screenshots
+budget to 896 steps and a 100% internal render scale; it is intended for screenshots
 or powerful GPUs. Critical rays that still exhaust the budget are darkened
 gracefully, and the status display reports when sampled view rays hit the cap.
 

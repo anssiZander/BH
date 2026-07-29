@@ -6,10 +6,10 @@ import {
 import { SchwarzschildRenderer } from "./webgl.js";
 
 const QUALITY_PROFILES = {
-  low: { maxSteps: 256, scale: 0.46, maxPixels: 600_000 },
-  medium: { maxSteps: 320, scale: 0.58, maxPixels: 950_000 },
-  high: { maxSteps: 416, scale: 0.68, maxPixels: 1_450_000 },
-  ultra: { maxSteps: 896, scale: 0.9, maxPixels: 3_200_000 },
+  low: { maxSteps: 256, scale: 0.52, maxPixels: 750_000 },
+  medium: { maxSteps: 320, scale: 0.68, maxPixels: 1_200_000 },
+  high: { maxSteps: 416, scale: 0.86, maxPixels: 2_000_000 },
+  ultra: { maxSteps: 896, scale: 1.0, maxPixels: 3_800_000 },
 };
 
 const CAPTURE_RHO = 0.515;
@@ -140,7 +140,7 @@ function bindControls() {
   ringsVisibleInput.addEventListener("change", updateRingVisibility);
   updateRingVisibility();
 
-  document.querySelector("#resetButton").addEventListener("click", () => camera?.reset());
+  document.querySelector("#resetButton").addEventListener("click", resetCamera);
   document.querySelector("#hideUiButton").addEventListener("click", toggleUi);
 
   document.querySelector("#collapseControls").addEventListener("click", (event) => {
@@ -161,9 +161,18 @@ function bindControls() {
 
   window.addEventListener("keydown", (event) => {
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
-    if (event.code === "KeyR") camera?.reset();
+    if (event.code === "KeyR") resetCamera();
     if (event.code === "KeyH") toggleUi();
   });
+
+  document.addEventListener("visibilitychange", () => {
+    renderer?.invalidateHistory();
+  });
+}
+
+function resetCamera() {
+  camera?.reset();
+  renderer?.invalidateHistory();
 }
 
 function arealRadiusToTrackPercent(radius) {

@@ -21,7 +21,8 @@
 No image or texture from the Shadertoy project is bundled or sampled at runtime.
 The original camera, Earth texture, temporal buffers, FSR, and post-processing
 passes are not used. Schwarzschild ray integration, station placement, controls,
-lensed sky, and final tone mapping are specific to this project.
+lensed sky, derivative filtering, FXAA, temporal accumulation, and final tone
+mapping are specific to this project.
 
 ## Galaxy sky texture
 

@@ -14,7 +14,7 @@
  */
 
 const float STATION_SCALE = PHOTON_RHO / 8.0;
-const float STATION_ROT_SPEED = 0.03;
+const float STATION_ROT_SPEED = 0.015;
 const float STATION_BAND_HALF_ARC = 1.0;
 
 const uint STATION_MAT_FLOOR = 1u;
@@ -206,8 +206,14 @@ vec4 stationTexPanels(vec2 uv, out vec3 normal) {
         );
     }
 
+    float filterWidth =
+        max(fwidth(panelDistance.x), 1e-4);
     float distanceValue =
-        saturate(panelDistance.x / borderThickness);
+        smoothstep(
+            -filterWidth,
+            borderThickness + filterWidth,
+            panelDistance.x
+        );
     if (distanceValue <= 0.0 || distanceValue >= 1.0) {
         panelDistance.yz = vec2(0.0);
     }
@@ -223,12 +229,35 @@ vec4 stationTexPanelsDense(vec2 uv, out vec3 normal) {
     vec3 textureNormal = vec3(0.0);
     vec4 textureColor = vec4(0.0);
     float mask = 0.0;
+    vec2 uvFootprint = fwidth(uv);
+    float maximumFootprint =
+        max(uvFootprint.x, uvFootprint.y);
     for (int layer = 0; layer < 9; ++layer) {
         vec3 layerNormal;
+        float layerScale = float(layer + 1);
         vec4 layerColor = stationTexPanels(
-            uv / float(layer + 1) + 37.5 * float(1 - layer),
+            uv / layerScale + 37.5 * float(1 - layer),
             layerNormal
         );
+        float layerFootprint =
+            maximumFootprint / layerScale;
+        float detailCoverage =
+            1.0
+            - smoothstep(0.35, 1.1, layerFootprint);
+        layerColor =
+            mix(
+                vec4(vec3(0.95), 0.075),
+                layerColor,
+                detailCoverage
+            );
+        layerNormal =
+            normalize(
+                mix(
+                    vec3(0.0, 0.0, 1.0),
+                    layerNormal,
+                    detailCoverage
+                )
+            );
         textureColor = mix(layerColor, textureColor, mask);
         textureNormal = mix(layerNormal, textureNormal, mask);
         mask = saturate((textureColor.a - 0.05) * 200.0);
