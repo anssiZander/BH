@@ -10,12 +10,11 @@
  * FSR, post-processing, and otherwise dead geometry.
  *
  * Inclusion contract: PI, PHOTON_RHO, STATION_INNER_BAND_LATITUDE,
- * STATION_OUTER_BAND_LATITUDE, and saturate(float) are defined first.
+ * STATION_OUTER_BAND_LATITUDE, uTime, and saturate(float) are defined first.
  */
 
 const float STATION_SCALE = PHOTON_RHO / 8.0;
-const float STATION_ROT_SPEED = -0.05;
-const float STATION_TIME_OLD = 0.0;
+const float STATION_ROT_SPEED = 0.03;
 const float STATION_BAND_HALF_ARC = 1.0;
 
 const uint STATION_MAT_FLOOR = 1u;
@@ -842,7 +841,7 @@ void stationDistanceToObjectSource(
 ) {
     point = stationRotateY(
         point,
-        STATION_ROT_SPEED * STATION_TIME_OLD
+        STATION_ROT_SPEED * uTime
     );
 
     float density = 8.0;

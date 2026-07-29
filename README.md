@@ -94,7 +94,8 @@ The source radius `8` is scaled by `ρphoton / 8`. A folded spherical-latitude
 mapping creates exact mirrored copies centered at `±0.1875` and `±0.5625`
 radians (`±10.74°` and `±32.23°`), each spanning about `14.32°`. The clear
 equatorial corridor and both gaps between adjacent bands are each about
-`7.16°` wide.
+`7.16°` wide. All four bands rotate together about their shared polar axis at
+`0.03` radians per second, completing one revolution in about 3.5 minutes.
 
 The adaptation retains the source CityBlock hull relief, dense procedural panel
 material, band-edge rails, material IDs, noise, finite-difference normals,
@@ -107,6 +108,11 @@ The `Station bands` switch disables all four bands independently of spheres and
 grids. Because sphere skins are opaque, an enabled skin naturally occludes
 station geometry behind it; disable `Spheres` to inspect the complete
 structure.
+
+The live areal-radius tracker uses a logarithmic `2M`–`22M` scale. Its horizon
+notch is the left endpoint at `2M`, while the photon-sphere notch and live
+camera marker are both positioned by the same scale function, so they coincide
+at `3M`.
 
 ## Quality and performance
 

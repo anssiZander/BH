@@ -101,6 +101,10 @@ four-band station revision.
 - The nominal equatorial corridor and the two gaps between adjacent bands are
   all `7.1620°` wide. The equatorial separation is exactly half the preceding
   two-band revision's `14.3239°` gap.
+- A frame-time uniform now drives one shared `0.03`-radian-per-second rotation
+  about the bands' common polar axis. Static data-flow inspection confirms that
+  all four copies pass through the same time-dependent transform. The resulting
+  rotation period is `209.439510` seconds.
 - Both shader and CPU stepping code use the same pair of sine-based angular-cone
   envelopes with a conservative `0.15`-radian half-angle. A deterministic
   100,000-point scan produced zero upper/lower mirror error, no nonfinite
@@ -108,12 +112,16 @@ four-band station revision.
   `1.0000000127`, within numerical tolerance of the envelope's unit-Lipschitz
   bound. The equatorial and adjacent-gap midpoint envelope distance at the
   photon radius is `0.0699596M`, outside the exact-station evaluation threshold.
-- The exact runtime marker replacement produced a 67,637-byte fragment shader
+- The exact runtime marker replacement produced a 67,609-byte fragment shader
   with SHA-256
-  `06ff820de3fba3dd380d61c1bb8e4f7f29f9a000c66886fdc8dbbf00d304fbe0`.
+  `0e9f4f2e2d82e8a32474098173ca5d76bff9b199603e20f773650458ce7182c6`.
   Static shader assembly found balanced delimiters, one injection marker, all
   referenced station functions defined, and no cross-lattice geometry in the
   active station scene.
+- The telemetry tracker uses one logarithmic areal-radius mapping over
+  `2M`–`22M` for both landmarks and the live marker. The horizon evaluates to
+  the exact left endpoint (`0%`), while the photon sphere and a live `3M`
+  position both evaluate to `16.909208367%`.
 - All three source JavaScript modules and the distribution Worker parse without
   syntax errors. All source/distribution runtime file pairs are byte-identical.
   Local HTTP returned `200` for the source and distribution HTML, modules,

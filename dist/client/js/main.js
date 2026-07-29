@@ -14,6 +14,8 @@ const QUALITY_PROFILES = {
 
 const CAPTURE_RHO = 0.515;
 const PHOTON_RHO = (2 + Math.sqrt(3)) / 2;
+const RADIAL_TRACK_MIN_AREAL = 2;
+const RADIAL_TRACK_MAX_AREAL = 22;
 const STATION_INNER_BAND_LATITUDE = 0.1875;
 const STATION_OUTER_BAND_LATITUDE = 0.5625;
 const STATION_ENVELOPE_HALF_ANGLE = 0.15;
@@ -36,6 +38,7 @@ const pointerHint = document.querySelector("#pointerHint");
 const statusPill = document.querySelector("#statusPill");
 const statusText = document.querySelector("#statusText");
 const controlsPanel = document.querySelector(".controls-panel");
+const radialLandmarks = document.querySelectorAll("[data-areal-radius]");
 
 const settings = {
   quality: "high",
@@ -76,6 +79,11 @@ function bindRange(inputId, outputId, settingKey, format, onInput) {
 }
 
 function bindControls() {
+  for (const landmark of radialLandmarks) {
+    const radius = Number(landmark.dataset.arealRadius);
+    landmark.style.left = `${arealRadiusToTrackPercent(radius)}%`;
+  }
+
   const qualitySelect = document.querySelector("#qualitySelect");
   const updateQuality = () => {
     settings.quality = qualitySelect.value;
@@ -158,6 +166,17 @@ function bindControls() {
   });
 }
 
+function arealRadiusToTrackPercent(radius) {
+  const clampedRadius = Math.max(
+    RADIAL_TRACK_MIN_AREAL,
+    Math.min(RADIAL_TRACK_MAX_AREAL, radius),
+  );
+  return (
+    Math.log(clampedRadius / RADIAL_TRACK_MIN_AREAL)
+    / Math.log(RADIAL_TRACK_MAX_AREAL / RADIAL_TRACK_MIN_AREAL)
+  ) * 100;
+}
+
 function toggleUi() {
   uiHidden = !uiHidden;
   document.body.classList.toggle("ui-hidden", uiHidden);
@@ -171,8 +190,7 @@ function updateTelemetry(now) {
   fpsValue.textContent = `${Math.round(smoothedFps)} FPS`;
   stepValue.textContent = `${settings.maxSteps} RK2`;
 
-  const logPosition = (Math.log(Math.max(radius, 2.001) / 2) / Math.log(22 / 2)) * 100;
-  radiusMarker.style.left = `${Math.max(1, Math.min(99, logPosition))}%`;
+  radiusMarker.style.left = `${arealRadiusToTrackPercent(radius)}%`;
 
   statusPill.classList.remove("warning", "danger");
   if (radius < 2.12) {
@@ -598,7 +616,7 @@ function animate(now) {
   const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
   lastFrameTime = now;
   camera.update(deltaSeconds);
-  renderer.render(camera, settings);
+  renderer.render(camera, settings, now / 1000);
 
   const instantaneousFps = 1 / Math.max(deltaSeconds, 1 / 240);
   smoothedFps += (instantaneousFps - smoothedFps) * 0.035;

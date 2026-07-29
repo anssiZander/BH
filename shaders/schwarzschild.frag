@@ -12,6 +12,7 @@ uniform vec3 uCameraPosition;
 uniform vec3 uCameraForward;
 uniform vec3 uCameraRight;
 uniform vec3 uCameraUp;
+uniform float uTime;
 uniform float uFovY;
 uniform int uMaxSteps;
 uniform float uBaseStep;

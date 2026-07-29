@@ -145,6 +145,7 @@ export class SchwarzschildRenderer {
       "uCameraForward",
       "uCameraRight",
       "uCameraUp",
+      "uTime",
       "uFovY",
       "uMaxSteps",
       "uBaseStep",
@@ -209,7 +210,7 @@ export class SchwarzschildRenderer {
     return true;
   }
 
-  render(camera, settings) {
+  render(camera, settings, timeSeconds) {
     this.resizeIfNeeded();
 
     const gl = this.gl;
@@ -224,6 +225,7 @@ export class SchwarzschildRenderer {
     gl.uniform3fv(u.uCameraForward, camera.forward);
     gl.uniform3fv(u.uCameraRight, camera.right);
     gl.uniform3fv(u.uCameraUp, camera.up);
+    gl.uniform1f(u.uTime, timeSeconds);
     gl.uniform1f(u.uFovY, (settings.fov * Math.PI) / 180);
     gl.uniform1i(u.uMaxSteps, settings.maxSteps);
     gl.uniform1f(u.uBaseStep, settings.baseStep);

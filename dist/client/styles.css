@@ -172,6 +172,7 @@ p {
   color: #d5daf0;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 8px;
+  transform: translateX(-50%);
 }
 
 .landmark::before {
@@ -194,12 +195,16 @@ p {
 }
 
 .horizon-mark {
-  left: 4%;
   color: #ff86ae;
+  transform: none;
+}
+
+.horizon-mark::before {
+  margin-right: 0;
+  margin-left: 0;
 }
 
 .photon-mark {
-  left: 18%;
   color: #b898ff;
 }
 
