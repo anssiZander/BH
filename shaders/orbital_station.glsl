@@ -79,6 +79,13 @@ vec3 stationRotateZ(vec3 value, float radians) {
     );
 }
 
+vec3 stationRotatingSourcePoint(vec3 sourcePoint) {
+    return stationRotateY(
+        sourcePoint,
+        STATION_ROT_SPEED * uTime
+    );
+}
+
 uint stationSmallHashA(in uint seed) {
     return (seed ^ 1057926937u) * 3812423987u
         ^ ((seed * seed) * 4000000007u);
@@ -839,10 +846,7 @@ void stationDistanceToObjectSource(
     out float distanceValue,
     out uint material
 ) {
-    point = stationRotateY(
-        point,
-        STATION_ROT_SPEED * uTime
-    );
+    point = stationRotatingSourcePoint(point);
 
     float density = 8.0;
     vec3 bandCoordinates = stationBandTransform(point);

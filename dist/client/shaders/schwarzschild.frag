@@ -471,7 +471,10 @@ vec3 stationSurfaceMaterial(
     float ambient,
     float sunShadow
 ) {
-    vec3 sourcePoint = worldPoint / STATION_SCALE;
+    // Keep the procedural panels, windows, and noise locked to the same
+    // rotating object-space point used by the station distance field.
+    vec3 sourcePoint =
+        stationRotatingSourcePoint(worldPoint / STATION_SCALE);
     vec3 sunDirection = normalize(vec3(0.93, 1.0, 1.0));
     const vec3 sunColor = vec3(2.58, 2.38, 2.10) * 0.8;
     const vec3 skyColor = vec3(0.3, 0.45, 0.8) * 0.5;

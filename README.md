@@ -95,7 +95,9 @@ mapping creates exact mirrored copies centered at `±0.1875` and `±0.5625`
 radians (`±10.74°` and `±32.23°`), each spanning about `14.32°`. The clear
 equatorial corridor and both gaps between adjacent bands are each about
 `7.16°` wide. All four bands rotate together about their shared polar axis at
-`0.03` radians per second, completing one revolution in about 3.5 minutes.
+`0.03` radians per second, completing one revolution in about 3.5 minutes. The
+distance-field geometry and all procedural panel, window, and surface-noise
+coordinates use the same rotating object-space transform.
 
 The adaptation retains the source CityBlock hull relief, dense procedural panel
 material, band-edge rails, material IDs, noise, finite-difference normals,

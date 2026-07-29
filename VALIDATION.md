@@ -105,6 +105,11 @@ four-band station revision.
   about the bands' common polar axis. Static data-flow inspection confirms that
   all four copies pass through the same time-dependent transform. The resulting
   rotation period is `209.439510` seconds.
+- The distance map and surface-material path both call the same rotating
+  source-point helper. The dense gray panel grid, side-window grid, floor
+  windows, material noise, and emissive noise therefore remain locked to their
+  corresponding rotating geometry instead of being sampled in stationary world
+  coordinates.
 - Both shader and CPU stepping code use the same pair of sine-based angular-cone
   envelopes with a conservative `0.15`-radian half-angle. A deterministic
   100,000-point scan produced zero upper/lower mirror error, no nonfinite
@@ -112,9 +117,9 @@ four-band station revision.
   `1.0000000127`, within numerical tolerance of the envelope's unit-Lipschitz
   bound. The equatorial and adjacent-gap midpoint envelope distance at the
   photon radius is `0.0699596M`, outside the exact-station evaluation threshold.
-- The exact runtime marker replacement produced a 67,609-byte fragment shader
+- The exact runtime marker replacement produced a 67,880-byte fragment shader
   with SHA-256
-  `0e9f4f2e2d82e8a32474098173ca5d76bff9b199603e20f773650458ce7182c6`.
+  `d881ebc5f9f5397599b52212b3397d11210d4c49a091620c5ce357c262216a5b`.
   Static shader assembly found balanced delimiters, one injection marker, all
   referenced station functions defined, and no cross-lattice geometry in the
   active station scene.

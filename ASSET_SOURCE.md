@@ -12,10 +12,11 @@
   scaled by the Schwarzschild photon-sphere radius divided by 8, curved along
   spherical latitude, duplicated at two latitudes per hemisphere, and mirrored
   above and below a clear equatorial gap. The four copies rotate together about
-  their shared polar axis. Its CityBlock greebles, panel shader, edge rails,
-  material IDs, noise, normals, ambient occlusion, and directional-shadow method
-  are retained. The source cross-lattice pipes, hub, four radial spokes, central
-  trusses, mast, and dishes are omitted.
+  their shared polar axis, with geometry and procedural materials evaluated in
+  the same rotating object space. Its CityBlock greebles, panel shader, edge
+  rails, material IDs, noise, normals, ambient occlusion, and
+  directional-shadow method are retained. The source cross-lattice pipes, hub,
+  four radial spokes, central trusses, mast, and dishes are omitted.
 
 No image or texture from the Shadertoy project is bundled or sampled at runtime.
 The original camera, Earth texture, temporal buffers, FSR, and post-processing
