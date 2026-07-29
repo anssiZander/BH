@@ -10,12 +10,11 @@
  * FSR, post-processing, and otherwise dead geometry.
  *
  * Inclusion contract: PI, PHOTON_RHO, STATION_INNER_BAND_LATITUDE,
- * STATION_OUTER_BAND_LATITUDE, uTime, uCameraPosition, uResolution, uFovY,
- * and saturate(float) are defined first.
+ * STATION_OUTER_BAND_LATITUDE, uTime, uStationRotationSpeed,
+ * uCameraPosition, uResolution, uFovY, and saturate(float) are defined first.
  */
 
 const float STATION_SCALE = PHOTON_RHO / 8.0;
-const float STATION_ROT_SPEED = 0.015;
 const float STATION_BAND_HALF_ARC = 1.0;
 
 const uint STATION_MAT_FLOOR = 1u;
@@ -83,7 +82,7 @@ vec3 stationRotateZ(vec3 value, float radians) {
 vec3 stationRotatingSourcePoint(vec3 sourcePoint) {
     return stationRotateY(
         sourcePoint,
-        STATION_ROT_SPEED * uTime
+        uStationRotationSpeed * uTime
     );
 }
 

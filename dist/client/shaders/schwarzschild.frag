@@ -19,6 +19,7 @@ uniform vec3 uPreviousCameraRight;
 uniform vec3 uPreviousCameraUp;
 uniform float uTime;
 uniform float uPreviousTime;
+uniform float uStationRotationSpeed;
 uniform vec2 uJitter;
 uniform float uFovY;
 uniform float uPreviousFovY;
@@ -1440,12 +1441,12 @@ vec3 stationPointAtPreviousTime(vec3 currentWorldPoint) {
     vec3 stationarySourcePoint =
         stationRotateY(
             currentWorldPoint / STATION_SCALE,
-            STATION_ROT_SPEED * uTime
+            uStationRotationSpeed * uTime
         );
     return
         stationRotateY(
             stationarySourcePoint,
-            -STATION_ROT_SPEED * uPreviousTime
+            -uStationRotationSpeed * uPreviousTime
         ) * STATION_SCALE;
 }
 

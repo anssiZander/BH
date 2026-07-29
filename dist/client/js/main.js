@@ -49,6 +49,7 @@ const settings = {
   shellCount: 8,
   exposure: 1.1,
   saturation: 1.18,
+  stationRotationSpeed: 0.015,
   lensing: true,
   gridVisible: true,
   spheresVisible: false,
@@ -99,6 +100,12 @@ function bindControls() {
   bindRange("speedInput", "speedOutput", null, (value) => value.toFixed(2), (value) => {
     if (camera) camera.speed = value;
   });
+  bindRange(
+    "rotationSpeedInput",
+    "rotationSpeedOutput",
+    "stationRotationSpeed",
+    (value) => `${Math.round((value / 0.015) * 100)}%`,
+  );
   bindRange("fovInput", "fovOutput", "fov", (value) => `${Math.round(value)}°`);
   bindRange("gridInput", "gridOutput", "gridBrightness", (value) => value.toFixed(2));
   bindRange("shellInput", "shellOutput", "shellCount", (value) => `${Math.round(value)}`);

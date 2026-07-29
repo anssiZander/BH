@@ -172,6 +172,17 @@ four-band station revision.
 This section supersedes the antialiasing, station-hit, and station-shadow
 implementation measurements in the preceding historical record.
 
+## Rotation control and softer camera response (30 July 2026)
+
+- The station rotation control spans `0.0000` to `0.0150` radians per second,
+  starts at the former fixed speed, and invalidates temporal history whenever
+  it changes. Current and previous-frame station transforms use the same
+  selected speed.
+- Frame-rate-independent mouse-look response was reduced from `24` to `14`.
+  Movement acceleration response was reduced from `12` to `7`, and
+  deceleration response from `30` to `14`, producing longer, smoother starts,
+  stops, and camera turns.
+
 - The supplied `1452 x 852`, 30 FPS recording contains 80 frames over
   `2.709313` seconds. Lensing is visibly disabled throughout. Registered
   close-up samples show roughly `6-14` pixels of station motion per frame.

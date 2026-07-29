@@ -205,6 +205,7 @@ function settingsSignature(settings) {
     settings.shellCount,
     settings.exposure,
     settings.saturation,
+    settings.stationRotationSpeed,
     settings.lensing,
     settings.gridVisible,
     settings.spheresVisible,
@@ -323,6 +324,7 @@ export class SchwarzschildRenderer {
       "uPreviousFovY",
       "uMotionValid",
       "uTime",
+      "uStationRotationSpeed",
       "uJitter",
       "uFovY",
       "uMaxSteps",
@@ -520,6 +522,7 @@ export class SchwarzschildRenderer {
     );
     gl.uniform1i(u.uMotionValid, motionValid ? 1 : 0);
     gl.uniform1f(u.uTime, timeSeconds);
+    gl.uniform1f(u.uStationRotationSpeed, settings.stationRotationSpeed);
     gl.uniform2f(u.uJitter, jitter[0], jitter[1]);
     gl.uniform1f(u.uFovY, fovY);
     gl.uniform1i(u.uMaxSteps, settings.maxSteps);

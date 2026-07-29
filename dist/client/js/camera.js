@@ -4,9 +4,9 @@ const RESET_YAW = Math.PI;
 const RESET_PITCH = -0.0996687;
 const HORIZON_GUARD = 0.535;
 const MAX_DELTA_SECONDS = 0.05;
-const LOOK_RESPONSE = 24;
-const MOVE_ACCELERATION_RESPONSE = 12;
-const MOVE_DECELERATION_RESPONSE = 30;
+const LOOK_RESPONSE = 14;
+const MOVE_ACCELERATION_RESPONSE = 7;
+const MOVE_DECELERATION_RESPONSE = 14;
 
 function normalize(out, x, y, z) {
   const length = Math.hypot(x, y, z) || 1;

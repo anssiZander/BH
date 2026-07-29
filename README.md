@@ -27,9 +27,12 @@ The shader files and local sky texture are loaded with `fetch()`, so opening
 - R: reset the camera
 - H: hide or restore the interface
 - Escape: release pointer lock
+- Station rotation: continuously adjusts the four bands from stopped to the
+  original `0.015`-radian-per-second speed
 
 The instrument panel controls RK2 integration quality, base ray step, flight
-speed, field of view, grid brightness, shell count, exposure, saturation, and
+speed, station rotation, field of view, grid brightness, shell count, exposure,
+saturation, and
 the internal render resolution. Lensing, shaded spheres, spherical grids, the
 sky sphere, and the orbital-station structure can each be disabled
 independently. The station control is labeled `Station bands` in the interface.
@@ -133,10 +136,10 @@ screen position. History is cleared after long frame stalls as well as on
 resize, quality or display-setting changes, camera reset, and tab visibility
 changes.
 
-Keyboard movement eases toward and away from its target velocity, while mouse
-look eases toward a target orientation. Both use frame-rate-independent
-exponential responses; reset, focus loss, and pointer-lock transitions cancel
-residual motion safely.
+Keyboard movement eases gradually toward and away from its target velocity,
+while mouse look uses a softer target-orientation response. Both use
+frame-rate-independent exponential responses; reset, focus loss, and
+pointer-lock transitions cancel residual motion safely.
 
 ## Quality and performance
 
