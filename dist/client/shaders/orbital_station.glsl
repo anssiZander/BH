@@ -10,7 +10,8 @@
  * FSR, post-processing, and otherwise dead geometry.
  *
  * Inclusion contract: PI, PHOTON_RHO, STATION_INNER_BAND_LATITUDE,
- * STATION_OUTER_BAND_LATITUDE, uTime, and saturate(float) are defined first.
+ * STATION_OUTER_BAND_LATITUDE, uTime, uCameraPosition, uResolution, uFovY,
+ * and saturate(float) are defined first.
  */
 
 const float STATION_SCALE = PHOTON_RHO / 8.0;
@@ -84,6 +85,27 @@ vec3 stationRotatingSourcePoint(vec3 sourcePoint) {
         sourcePoint,
         STATION_ROT_SPEED * uTime
     );
+}
+
+float stationMicroDetailCoverage(vec3 unrotatedSourcePoint) {
+    float cameraDistance =
+        length(
+            unrotatedSourcePoint * STATION_SCALE
+            - uCameraPosition
+        );
+    float worldPixelFootprint =
+        max(
+            2.0
+            * cameraDistance
+            * tan(0.5 * uFovY)
+            / max(uResolution.y, 1.0),
+            1e-6
+        );
+    const float cityCellWorldSize =
+        STATION_SCALE * 0.125;
+    float cityCellPixels =
+        cityCellWorldSize / worldPixelFootprint;
+    return smoothstep(4.0, 12.0, cityCellPixels);
 }
 
 uint stationSmallHashA(in uint seed) {
@@ -176,7 +198,11 @@ vec3 stationPanelBox(vec2 uv, vec2 radius) {
     return vec3(distanceValue, gradient);
 }
 
-vec4 stationTexPanels(vec2 uv, out vec3 normal) {
+vec4 stationTexPanels(
+    vec2 uv,
+    float uvFootprint,
+    out vec3 normal
+) {
     vec4 hash = stationHashVec4I2(ivec2(floor(uv)));
     vec4 hash2 = stationHashVec4I2(ivec2(hash * 8192.0));
     vec4 hash3 = stationHashVec4I2(ivec2(hash2 * 8192.0));
@@ -207,7 +233,7 @@ vec4 stationTexPanels(vec2 uv, out vec3 normal) {
     }
 
     float filterWidth =
-        max(fwidth(panelDistance.x), 1e-4);
+        max(uvFootprint, 1e-4);
     float distanceValue =
         smoothstep(
             -filterWidth,
@@ -225,18 +251,22 @@ vec4 stationTexPanels(vec2 uv, out vec3 normal) {
     );
 }
 
-vec4 stationTexPanelsDense(vec2 uv, out vec3 normal) {
+vec4 stationTexPanelsDense(
+    vec2 uv,
+    float uvFootprint,
+    out vec3 normal
+) {
     vec3 textureNormal = vec3(0.0);
     vec4 textureColor = vec4(0.0);
     float mask = 0.0;
-    vec2 uvFootprint = fwidth(uv);
     float maximumFootprint =
-        max(uvFootprint.x, uvFootprint.y);
+        max(uvFootprint, 1e-5);
     for (int layer = 0; layer < 9; ++layer) {
         vec3 layerNormal;
         float layerScale = float(layer + 1);
         vec4 layerColor = stationTexPanels(
             uv / layerScale + 37.5 * float(1 - layer),
+            maximumFootprint / layerScale,
             layerNormal
         );
         float layerFootprint =
@@ -570,6 +600,7 @@ void stationDish(vec3 point, out float distanceValue, out uint material) {
 void stationCityBlock(
     vec3 point,
     ivec2 integerCell,
+    float microDetailCoverage,
     out float distanceValue,
     out uint material
 ) {
@@ -697,7 +728,10 @@ void stationCityBlock(
                 material = STATION_MAT_FLOOR;
             }
 
-            if (randomValue2.w < 0.25) {
+            if (
+                randomValue2.w < 0.25
+                && microDetailCoverage > 0.001
+            ) {
                 float detailDistance = stationSdRoundBox(
                     (
                         baseCenter
@@ -708,6 +742,10 @@ void stationCityBlock(
                         * 0.5,
                     baseRadius * 0.45 * randomValue.w
                 );
+                detailDistance +=
+                    (1.0 - microDetailCoverage)
+                    * baseRadius
+                    * 0.5;
                 stationMatMin(
                     distanceValue,
                     material,
@@ -797,7 +835,7 @@ void stationCityBlock(
                     + sin(point.z * 16.0)
                 ) * 0.015
             )
-        );
+        ) * microDetailCoverage;
         float secondDistance = stationSdRoundBox(
             baseCenter * vec3(1.0, 1.0 - roofWave, 1.0)
                 + vec3(0.0, 0.75, 0.0),
@@ -827,9 +865,13 @@ void stationCityBlock(
 
     vec3 repeatedPoint = point - vec3(0.0, 0.1, 0.5);
     repeatedPoint.x = stationRepeat(repeatedPoint.x, 0.5);
-    float pipeDistance =
-        length(repeatedPoint.xy) - 0.0625 * randomValue2.x;
-    if (randomValue.z > 0.7) {
+    float pipeRadius =
+        0.0625
+        * randomValue2.x
+        * microDetailCoverage
+        - 0.025 * (1.0 - microDetailCoverage);
+    float pipeDistance = length(repeatedPoint.xy) - pipeRadius;
+    if (randomValue.z > 0.7 && pipeRadius > 0.0) {
         stationMatMin(
             distanceValue,
             material,
@@ -841,8 +883,12 @@ void stationCityBlock(
     repeatedPoint =
         point - vec3(0.0, 0.13 * randomValue.z, 0.5);
     repeatedPoint.z = stationRepeat(repeatedPoint.z, 0.5);
-    pipeDistance = length(repeatedPoint.yz) - 0.025;
-    if (randomLarger.y > 0.6) {
+    pipeRadius =
+        0.025
+        * microDetailCoverage
+        - 0.015 * (1.0 - microDetailCoverage);
+    pipeDistance = length(repeatedPoint.yz) - pipeRadius;
+    if (randomLarger.y > 0.6 && pipeRadius > 0.0) {
         stationMatMin(
             distanceValue,
             material,
@@ -854,8 +900,12 @@ void stationCityBlock(
             point - vec3(0.0, 0.5 * randomValue2.z, 0.5);
         repeatedPoint.x =
             stationRepeat(repeatedPoint.x, 1.0);
-        pipeDistance = length(repeatedPoint.xy) - 0.05;
-        if (randomLarge.y > 0.5) {
+        pipeRadius =
+            0.05
+            * microDetailCoverage
+            - 0.02 * (1.0 - microDetailCoverage);
+        pipeDistance = length(repeatedPoint.xy) - pipeRadius;
+        if (randomLarge.y > 0.5 && pipeRadius > 0.0) {
             uint pipeMaterial = STATION_MAT_PIPE;
             if (randomLarge.x > 0.95) {
                 pipeMaterial = STATION_MAT_YELLOW;
@@ -875,6 +925,8 @@ void stationDistanceToObjectSource(
     out float distanceValue,
     out uint material
 ) {
+    float microDetailCoverage =
+        stationMicroDetailCoverage(point);
     point = stationRotatingSourcePoint(point);
 
     float density = 8.0;
@@ -896,6 +948,7 @@ void stationDistanceToObjectSource(
     stationCityBlock(
         repeated,
         ivec2(floor(cylindrical.xz)),
+        microDetailCoverage,
         temporaryDistance,
         temporaryMaterial
     );

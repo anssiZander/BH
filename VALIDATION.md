@@ -167,6 +167,87 @@ four-band station revision.
 - No interactive browser pointer-lock, resize, or rendered-frame screenshot
   pass was performed for this revision; none is represented here as a success.
 
+## 30 July temporal-reconstruction revision
+
+This section supersedes the antialiasing, station-hit, and station-shadow
+implementation measurements in the preceding historical record.
+
+- The supplied `1452 x 852`, 30 FPS recording contains 80 frames over
+  `2.709313` seconds. Lensing is visibly disabled throughout. Registered
+  close-up samples show roughly `6-14` pixels of station motion per frame.
+  Edge neighborhoods occupy about `9.6%` of the analyzed patch but account for
+  `38.9%` of luminance changes above 8/255; their mean absolute change is
+  `19.2/255`, versus `2.19/255` in flat interiors. This localizes the dominant
+  flicker to SDF silhouettes, seams, greebles, and shadow boundaries rather
+  than video compression or the lensing integrator.
+- Ten of 79 recorded frame transitions are near-identical holds followed by
+  larger motion jumps. Antialiasing cannot synthesize missing presentation
+  frames, so the revision also reduces ray-march instability and shadow cost
+  instead of treating the issue as temporal filtering alone.
+- The exact archived public API response for Shadertoy `X33BRn` is 110,800
+  bytes with SHA-256
+  `752c3a09addb84800f941d3ea6ae725e9051bc83951eaf11d70b758be0a0251b`.
+  Its pass graph and behavior confirmed a 360-phase Halton sequence,
+  previous-camera reprojection, Catmull-Rom history reconstruction,
+  center-plus-cardinal variance clipping, 90% history, EASU, and a final RCAS
+  pass. The WebGL implementation here was independently written and adds
+  explicit motion for the genuinely rotating station.
+- The station scene now refines accepted SDF intersections for six iterations,
+  uses an `0.08`-pixel hit tolerance clamped to
+  `0.00012M-0.0012M`, projects shading back toward the exact surface, and
+  derives its normal epsilon from the ray footprint. CityBlock rounded details,
+  roof ripple, and three micro-pipe families fade as a procedural cell drops
+  through approximately 12 to 4 pixels. All material filtering uses the
+  explicit ray footprint; no `fwidth` remains in the ray-march shaders.
+- The former multiplicative, voxel-phase shadow trace is replaced by a
+  deterministic 28-step soft SDF trace using a conservative `min(8d/t)`
+  visibility bound. Ambient occlusion now accumulates four weighted geometric
+  deficits rather than multiplying six discontinuous terms.
+- In flat-ray mode, the scene uses 360 centered Halton samples and writes an
+  RGBA8 previous-UV attachment. A station hit is transformed from its current
+  rotating object space to its previous world position, then projected with
+  the previous camera basis and FOV. The two UV coordinates use 16 bits each;
+  100,001 deterministic samples produced a maximum normalized packing error of
+  `1.5259022 x 10^-5`, or about `0.0222` pixel at the recording width. The
+  reserved `(255,255,255,255)` invalid code does not collide with the `(1,1)`
+  endpoint. A 10,000-point current/previous rotation check had maximum
+  object-space round-trip error `6.66 x 10^-16`.
+- The temporal pass reconstructs reprojected history with nine bilinear
+  Catmull-Rom taps, clips it to current YCoCg mean/variance and min/max bounds,
+  rejects luminance, chroma, depth, and large-motion mismatches, and uses up to
+  90% history. Invalid or lensed motion falls back to contrast-adaptive spatial
+  edge filtering. Lensed primary rays receive zero temporal jitter because a
+  single pinhole inverse motion coordinate is not valid for multiple
+  Schwarzschild images. A restrained RCAS-style pass presents the resolved
+  image.
+- High now renders at native device resolution; Ultra renders at `1.15x`.
+  Medium rises to `0.78x`. Long gaps above `0.12` seconds, resizing, quality or
+  scene-setting changes, reset, and visibility changes invalidate history.
+- Chrome 150's WebGL-compatible ANGLE OpenGL ES 3.0 compiler accepted the exact
+  280-byte vertex shader, 83,832-byte assembled scene fragment, 13,602-byte
+  temporal fragment, and 2,528-byte RCAS fragment with empty compiler logs.
+  All three programs linked with empty logs. The assembled scene SHA-256 is
+  `218d7509c75dd5e3d0a97eb331a966dd2b55e0e1deaa313f2c2a8653e528205c`;
+  temporal is
+  `6cfb00511fb4dc17dd047b772e5b86d6e248918bf864fd02253a979d5642cfb8`;
+  RCAS is
+  `1e37cb63dcba5ed50db87870cedf78248719adab2e94446fed2487277fecc164`.
+  All 36 active uniforms match their JavaScript setters and sampler units, and
+  the scene's output locations match the two MRT attachments.
+- A 160 x 90 three-frame ANGLE runtime smoke completed the full
+  scene-MRT -> temporal-history -> RCAS chain. The scene MRT, both history
+  targets, and default framebuffer were complete; every pass and readback
+  returned zero GL errors. The warm-up frame used zero jitter and invalid
+  motion, followed by Halton `(0,-1/6)` and `(-0.25,1/6)` with all 14,400
+  pixels carrying valid motion in the static-camera test. Station depth was
+  already present on the warm-up frame. Decoded static motion stayed within
+  `0.006218` pixel per axis, with `0.000816`-pixel frame-two RMS error.
+- All three source and distribution JavaScript modules and the distribution
+  Worker parse successfully. All 19 source/distribution runtime file pairs are
+  byte-identical, including the new RCAS shader. Local source and distribution
+  servers each returned HTTP `200` for the HTML, stylesheet, three modules,
+  five shader resources, and the 4K sky texture.
+
 The simulation remains an educational real-time approximation. The thinnest
 critical set can exhaust even the Ultra budget and is handled with a stable,
 impact-parameter-aware fallback instead of being allowed to stall the GPU.

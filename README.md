@@ -101,28 +101,37 @@ coordinates use the same rotating object-space transform.
 
 The adaptation retains the source CityBlock hull relief, dense procedural panel
 material, band-edge rails, material IDs, noise, finite-difference normals,
-ambient occlusion, and directional shadowing. The protruding cross-lattice
-pipes, four center-facing spokes, central hub, ladder struts, communications
-mast, and repeated dishes are omitted. Camera, Earth, temporal-antialiasing,
-FSR, and post-processing passes from the Shadertoy are not imported; the
-existing Schwarzschild camera, lensed sky, anti-aliasing pipeline, and tone
-mapper remain in control. The `Station bands` switch disables all four bands
-independently of spheres and grids. Because sphere skins are opaque, an enabled
-skin naturally occludes station geometry behind it; disable `Spheres` to
-inspect the complete structure.
+ambient occlusion, and directional shadowing. Surface hits are refined before
+shading, normal and shadow tolerances follow the projected pixel footprint, and
+sub-pixel CityBlock pipes and roof details fade into the macro hull instead of
+alternating between hit and miss from frame to frame. The protruding
+cross-lattice pipes, four center-facing spokes, central hub, ladder struts,
+communications mast, and repeated dishes are omitted. Camera, Earth,
+temporal-antialiasing, and post-processing code from the Shadertoy are not
+copied; the Schwarzschild camera, lensed sky, and tone mapper remain in control.
+The original project's rendering strategy informed the independently
+implemented anti-aliasing pipeline described below. The `Station bands` switch
+disables all four bands independently of spheres and grids. Because sphere
+skins are opaque, an enabled skin naturally occludes station geometry behind
+it; disable `Spheres` to inspect the complete structure.
 
 The live areal-radius tracker uses a logarithmic `2M`–`22M` scale. Its horizon
 notch is the left endpoint at `2M`, while the photon-sphere notch and live
 camera marker are both positioned by the same scale function, so they coincide
 at `3M`.
 
-Dense station detail is band-limited with screen-space derivative filtering.
-Each frame is rendered through FXAA and an eight-phase sub-pixel jitter
-sequence, then combined with a short neighborhood-clamped history. Luminance
-and color change reject stale samples, camera-motion rejection is normalized by
-frame time, and temporal influence is capped at 20% while the station rotates.
-History is cleared after frame stalls as well as on resize, quality or
-display-setting changes, camera reset, and tab visibility changes.
+In flat-ray mode, each scene sample uses a 360-phase Halton jitter sequence.
+The scene writes the previous-frame UV of every visible rotating station point
+into an RGBA8 motion attachment, accounting for both camera motion and the
+station's object-space rotation. A Catmull–Rom history reconstruction is clipped
+to current-frame YCoCg neighborhood mean and variance before accumulation, so
+the history can suppress edge crawl without leaving long trails at
+disocclusions. A restrained RCAS-style final pass restores local definition
+after the temporal resolve. Lensed images do not have a unique pinhole inverse
+motion map, so their jitter is disabled rather than accumulated at an incorrect
+screen position. History is cleared after long frame stalls as well as on
+resize, quality or display-setting changes, camera reset, and tab visibility
+changes.
 
 Keyboard movement eases toward and away from its target velocity, while mouse
 look eases toward a target orientation. Both use frame-rate-independent
@@ -131,12 +140,14 @@ residual motion safely.
 
 ## Quality and performance
 
-`High` is the default and uses 416 RK2 steps with an 86% internal render scale.
+`High` is the default and uses 416 RK2 steps at native device resolution up to
+its 2.6-megapixel safety cap.
 It targets smooth real-time interaction at 1080p on an RTX 4070-class GPU.
 `Low` and `Medium` reduce both ray budget and pixel count. `Ultra` raises the
-budget to 896 steps and a 100% internal render scale; it is intended for screenshots
-or powerful GPUs. Critical rays that still exhaust the budget are darkened
-gracefully, and the status display reports when sampled view rays hit the cap.
+budget to 896 steps and a 115% internal render scale; it is intended for
+screenshots or powerful GPUs. Critical rays that still exhaust the budget are
+darkened gracefully, and the status display reports when sampled view rays hit
+the cap.
 
 ## Approximations
 

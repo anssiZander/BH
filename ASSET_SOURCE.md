@@ -5,7 +5,8 @@
 - **Title:** *[TAA] Orbital Megastructure*
 - **Creator:** morimea
 - **Source:** https://www.shadertoy.com/view/X33BRn
-- **License:** CC0 public-domain dedication in the shader source
+- **License:** CC0 public-domain dedication for the ported orbital geometry;
+  the temporal passes were studied as behavioral references and were not copied
 - **Use in this project:** The active station object map and procedural material
   helpers were ported into `shaders/orbital_station.glsl`, with source symbols
   namespaced for this renderer. The source-radius-8 ring hull is uniformly
@@ -14,15 +15,39 @@
   above and below a clear equatorial gap. The four copies rotate together about
   their shared polar axis, with geometry and procedural materials evaluated in
   the same rotating object space. Its CityBlock greebles, panel shader, edge
-  rails, material IDs, noise, normals, ambient occlusion, and
-  directional-shadow method are retained. The source cross-lattice pipes, hub,
-  four radial spokes, central trusses, mast, and dishes are omitted.
+  rails, material IDs, and noise are retained. Surface refinement,
+  footprint-driven geometry detail, normals, ambient occlusion, and the
+  deterministic soft-shadow marcher are specific to this adaptation. The
+  source cross-lattice pipes, hub, four radial spokes, central trusses, mast,
+  and dishes are omitted.
 
 No image or texture from the Shadertoy project is bundled or sampled at runtime.
-The original camera, Earth texture, temporal buffers, FSR, and post-processing
-passes are not used. Schwarzschild ray integration, station placement, controls,
-lensed sky, derivative filtering, FXAA, temporal accumulation, and final tone
-mapping are specific to this project.
+The original camera, Earth texture, temporal buffers, and post-processing code
+are not used. Schwarzschild ray integration, station placement, controls,
+lensed sky, motion-vector output, temporal resolve, and final tone mapping are
+specific to this project.
+
+## Antialiasing design references
+
+- **Original behavioral reference:** morimea's
+  *[TAA] Orbital Megastructure*, Shadertoy `X33BRn`
+- **Archived public API response inspected:** pinned
+  [`X33BRn.json`](https://github.com/GabeRundlett/shadertoy-api-shaders/blob/f6d538adf936215ccf2d11ba9b4a6c79ccb448c5/shaders/X33BRn.json),
+  SHA-256
+  `752c3a09addb84800f941d3ea6ae725e9051bc83951eaf11d70b758be0a0251b`
+- **Temporal clipping reference:** Playdead's
+  [MIT-licensed temporal repository](https://github.com/playdeadgames/temporal)
+- **Sharpening reference:** AMD FidelityFX
+  [FSR1 documentation](https://gpuopen.com/manuals/fidelityfx_sdk/techniques/super-resolution-spatial/)
+  and [MIT-licensed SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK)
+
+The archived Shadertoy pass graph was studied to recover the intended strategy:
+a long Halton sequence, previous-camera reprojection, Catmull–Rom history
+sampling, neighborhood variance clipping, and a restrained reconstruction
+sharpen. The implementation in this repository was written for its WebGL2
+multi-render-target pipeline and genuine object-space station rotation; it does
+not copy the archived temporal pass. The FSR-style final limiter is a compact
+WebGL implementation informed by AMD's permissively licensed documentation.
 
 ## Galaxy sky texture
 

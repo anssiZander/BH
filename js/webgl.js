@@ -3,24 +3,32 @@ const SHADER_PATHS = {
   fragment: "shaders/schwarzschild.frag",
   orbitalStation: "shaders/orbital_station.glsl",
   fxaa: "shaders/fxaa.frag",
+  rcas: "shaders/rcas.frag",
 };
 
 const SKY_TEXTURE_PATH = "assets/galaxy_4k.jpg";
 const ORBITAL_STATION_MARKER = "/*__ORBITAL_STATION_GLSL__*/";
-const ZERO_JITTER = [0, 0];
-const TEMPORAL_JITTER = [
-  [7 / 128, -1 / 6],
-  [-25 / 128, 1 / 6],
-  [39 / 128, -7 / 18],
-  [-41 / 128, -1 / 18],
-  [23 / 128, 5 / 18],
-  [-9 / 128, -5 / 18],
-  [55 / 128, 1 / 18],
-  [-49 / 128, 7 / 18],
-];
 const MAX_HISTORY_FRAME_GAP = 0.12;
-const CAMERA_MOTION_RATE_LIMIT = 0.36;
-const ROTATING_SCENE_HISTORY_CAP = 0.2;
+const TEMPORAL_HISTORY_WEIGHT = 0.9;
+const RCAS_SHARPNESS = 0.18;
+const ZERO_JITTER = [0, 0];
+
+function radicalInverse(index, base) {
+  let value = 0;
+  let fraction = 1 / base;
+  let remaining = index;
+  while (remaining > 0) {
+    value += (remaining % base) * fraction;
+    remaining = Math.floor(remaining / base);
+    fraction /= base;
+  }
+  return value;
+}
+
+const TEMPORAL_JITTER = Array.from({ length: 360 }, (_, index) => [
+  radicalInverse(index + 1, 2) - 0.5,
+  radicalInverse(index + 1, 3) - 0.5,
+]);
 
 function shaderTypeName(gl, type) {
   return type === gl.VERTEX_SHADER ? "vertex" : "fragment";
@@ -106,6 +114,59 @@ function createColorTarget(gl) {
   return { texture, framebuffer };
 }
 
+function createSceneTarget(gl) {
+  const colorTexture = gl.createTexture();
+  const motionTexture = gl.createTexture();
+  const framebuffer = gl.createFramebuffer();
+  for (const texture of [colorTexture, motionTexture]) {
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  }
+  gl.bindTexture(gl.TEXTURE_2D, motionTexture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return { colorTexture, motionTexture, framebuffer };
+}
+
+function resizeSceneTarget(gl, target, width, height) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+  const attachments = [
+    [target.colorTexture, gl.COLOR_ATTACHMENT0],
+    [target.motionTexture, gl.COLOR_ATTACHMENT1],
+  ];
+  for (const [texture, attachment] of attachments) {
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA8,
+      width,
+      height,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      null,
+    );
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      attachment,
+      gl.TEXTURE_2D,
+      texture,
+      0,
+    );
+  }
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    throw new Error("The temporal scene render target is incomplete.");
+  }
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
 function resizeColorTarget(gl, target, width, height) {
   gl.bindTexture(gl.TEXTURE_2D, target.texture);
   gl.texImage2D(
@@ -127,6 +188,7 @@ function resizeColorTarget(gl, target, width, height) {
     target.texture,
     0,
   );
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
   if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
     throw new Error("The anti-aliasing render target is incomplete.");
   }
@@ -172,11 +234,13 @@ export class SchwarzschildRenderer {
       fragmentTemplate,
       orbitalStationSource,
       fxaaSource,
+      rcasSource,
     ] = await Promise.all([
       fetchText(SHADER_PATHS.vertex),
       fetchText(SHADER_PATHS.fragment),
       fetchText(SHADER_PATHS.orbitalStation),
       fetchText(SHADER_PATHS.fxaa),
+      fetchText(SHADER_PATHS.rcas),
     ]);
     const markerCount = fragmentTemplate.split(ORBITAL_STATION_MARKER).length - 1;
     if (markerCount !== 1) {
@@ -192,27 +256,31 @@ export class SchwarzschildRenderer {
     const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
     const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
     const fxaaShader = compileShader(gl, gl.FRAGMENT_SHADER, fxaaSource);
+    const rcasShader = compileShader(gl, gl.FRAGMENT_SHADER, rcasSource);
     const program = linkProgram(gl, vertexShader, fragmentShader);
     const fxaaProgram = linkProgram(gl, vertexShader, fxaaShader);
+    const rcasProgram = linkProgram(gl, vertexShader, rcasShader);
     gl.deleteShader(vertexShader);
     gl.deleteShader(fragmentShader);
     gl.deleteShader(fxaaShader);
+    gl.deleteShader(rcasShader);
 
     onProgress("Decoding the 4K spherical sky field…");
     const skyImage = await loadImage(SKY_TEXTURE_PATH);
     const skyTexture = createSkyTexture(gl, skyImage);
 
-    return new SchwarzschildRenderer(canvas, gl, program, fxaaProgram, skyTexture, {
+    return new SchwarzschildRenderer(canvas, gl, program, fxaaProgram, rcasProgram, skyTexture, {
       width: skyImage.naturalWidth,
       height: skyImage.naturalHeight,
     });
   }
 
-  constructor(canvas, gl, program, fxaaProgram, skyTexture, textureSize) {
+  constructor(canvas, gl, program, fxaaProgram, rcasProgram, skyTexture, textureSize) {
     this.canvas = canvas;
     this.gl = gl;
     this.program = program;
     this.fxaaProgram = fxaaProgram;
+    this.rcasProgram = rcasProgram;
     this.skyTexture = skyTexture;
     this.textureSize = textureSize;
     this.renderScale = 0.86;
@@ -222,7 +290,8 @@ export class SchwarzschildRenderer {
     this.lastDpr = 0;
     this.uniforms = {};
     this.fxaaUniforms = {};
-    this.sceneTarget = createColorTarget(gl);
+    this.rcasUniforms = {};
+    this.sceneTarget = createSceneTarget(gl);
     this.historyTargets = [
       createColorTarget(gl),
       createColorTarget(gl),
@@ -232,6 +301,10 @@ export class SchwarzschildRenderer {
     this.frameIndex = 0;
     this.previousCameraPosition = new Float32Array(3);
     this.previousCameraForward = new Float32Array(3);
+    this.previousCameraRight = new Float32Array(3);
+    this.previousCameraUp = new Float32Array(3);
+    this.previousFovY = 0;
+    this.previousSceneTime = 0;
     this.hasPreviousCamera = false;
     this.previousRenderTime = Number.NaN;
     this.previousSettingsSignature = "";
@@ -242,6 +315,13 @@ export class SchwarzschildRenderer {
       "uCameraForward",
       "uCameraRight",
       "uCameraUp",
+      "uPreviousCameraPosition",
+      "uPreviousCameraForward",
+      "uPreviousCameraRight",
+      "uPreviousCameraUp",
+      "uPreviousTime",
+      "uPreviousFovY",
+      "uMotionValid",
       "uTime",
       "uJitter",
       "uFovY",
@@ -263,8 +343,9 @@ export class SchwarzschildRenderer {
       this.uniforms[name] = gl.getUniformLocation(program, name);
     }
     for (const name of [
-      "uScene",
-      "uHistory",
+      "uCurrentFrame",
+      "uHistoryFrame",
+      "uMotionFrame",
       "uResolution",
       "uHistoryValid",
       "uHistoryBlend",
@@ -272,16 +353,30 @@ export class SchwarzschildRenderer {
       this.fxaaUniforms[name] =
         gl.getUniformLocation(fxaaProgram, name);
     }
+    for (const name of [
+      "uSource",
+      "uResolution",
+      "uSharpness",
+    ]) {
+      this.rcasUniforms[name] =
+        gl.getUniformLocation(rcasProgram, name);
+    }
 
     this.vao = gl.createVertexArray();
     gl.bindVertexArray(this.vao);
     gl.useProgram(program);
     gl.uniform1i(this.uniforms.uSky, 0);
     gl.useProgram(fxaaProgram);
-    gl.uniform1i(this.fxaaUniforms.uScene, 1);
-    gl.uniform1i(this.fxaaUniforms.uHistory, 2);
+    gl.uniform1i(this.fxaaUniforms.uCurrentFrame, 1);
+    gl.uniform1i(this.fxaaUniforms.uHistoryFrame, 2);
+    gl.uniform1i(this.fxaaUniforms.uMotionFrame, 3);
+    gl.useProgram(rcasProgram);
+    gl.uniform1i(this.rcasUniforms.uSource, 4);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);
+    // RGBA8 motion vectors store exact bytes; framebuffer dithering would
+    // randomly alter the packed previous-UV coordinates.
+    gl.disable(gl.DITHER);
   }
 
   setQuality(profile) {
@@ -323,7 +418,7 @@ export class SchwarzschildRenderer {
     this.lastCssWidth = cssWidth;
     this.lastCssHeight = cssHeight;
     this.lastDpr = dpr;
-    resizeColorTarget(this.gl, this.sceneTarget, width, height);
+    resizeSceneTarget(this.gl, this.sceneTarget, width, height);
     for (const target of this.historyTargets) {
       resizeColorTarget(this.gl, target, width, height);
     }
@@ -361,59 +456,33 @@ export class SchwarzschildRenderer {
     }
     this.previousSettingsSignature = currentSettingsSignature;
 
-    let cameraMotion = Number.POSITIVE_INFINITY;
-    if (this.hasPreviousCamera) {
-      const positionMotion = Math.hypot(
-        camera.position[0] - this.previousCameraPosition[0],
-        camera.position[1] - this.previousCameraPosition[1],
-        camera.position[2] - this.previousCameraPosition[2],
+    const fovY = (settings.fov * Math.PI) / 180;
+    const motionValid = this.historyValid && this.hasPreviousCamera;
+    const historyBlend = motionValid ? TEMPORAL_HISTORY_WEIGHT : 0;
+    // Lensed images do not have a pinhole inverse motion map. Keep them
+    // spatially stable instead of injecting temporal jitter that cannot be
+    // reprojected correctly.
+    const jitterSafe =
+      motionValid
+      && !settings.lensing
+      && !(
+        settings.gridVisible
+        && settings.gridBrightness > 0
       );
-      const directionMotion = Math.hypot(
-        camera.forward[0] - this.previousCameraForward[0],
-        camera.forward[1] - this.previousCameraForward[1],
-        camera.forward[2] - this.previousCameraForward[2],
-      );
-      cameraMotion =
-        positionMotion + directionMotion * 1.5;
-    }
-    this.previousCameraPosition.set(camera.position);
-    this.previousCameraForward.set(camera.forward);
-    this.hasPreviousCamera = true;
-
-    const cameraMotionRate =
-      Number.isFinite(cameraMotion)
-      && Number.isFinite(frameDeltaSeconds)
-      && frameDeltaSeconds > 1e-4
-        ? cameraMotion / frameDeltaSeconds
-        : Number.POSITIVE_INFINITY;
-    const stability = Number.isFinite(cameraMotionRate)
-      ? Math.max(
-        0,
-        Math.min(
-          1,
-          1 - cameraMotionRate / CAMERA_MOTION_RATE_LIMIT,
-        ),
-      )
-      : 0;
-    const historyCap = settings.ringsVisible
-      ? ROTATING_SCENE_HISTORY_CAP
-      : 0.68;
-    const historyBlend = this.historyValid
-      ? Math.min(
-        historyCap,
-        0.08 + 0.6 * stability * stability,
-      )
-      : 0;
-    const jitter =
-      this.historyValid && stability > 0.8
-        ? TEMPORAL_JITTER[this.frameIndex % TEMPORAL_JITTER.length]
-        : ZERO_JITTER;
+    const jitter = !jitterSafe
+      ? ZERO_JITTER
+      : TEMPORAL_JITTER[
+        (this.frameIndex - 1) % TEMPORAL_JITTER.length
+      ];
 
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, null);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneTarget.framebuffer);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.useProgram(this.program);
     gl.bindVertexArray(this.vao);
@@ -425,9 +494,34 @@ export class SchwarzschildRenderer {
     gl.uniform3fv(u.uCameraForward, camera.forward);
     gl.uniform3fv(u.uCameraRight, camera.right);
     gl.uniform3fv(u.uCameraUp, camera.up);
+    gl.uniform3fv(
+      u.uPreviousCameraPosition,
+      motionValid ? this.previousCameraPosition : camera.position,
+    );
+    gl.uniform3fv(
+      u.uPreviousCameraForward,
+      motionValid ? this.previousCameraForward : camera.forward,
+    );
+    gl.uniform3fv(
+      u.uPreviousCameraRight,
+      motionValid ? this.previousCameraRight : camera.right,
+    );
+    gl.uniform3fv(
+      u.uPreviousCameraUp,
+      motionValid ? this.previousCameraUp : camera.up,
+    );
+    gl.uniform1f(
+      u.uPreviousTime,
+      motionValid ? this.previousSceneTime : timeSeconds,
+    );
+    gl.uniform1f(
+      u.uPreviousFovY,
+      motionValid ? this.previousFovY : fovY,
+    );
+    gl.uniform1i(u.uMotionValid, motionValid ? 1 : 0);
     gl.uniform1f(u.uTime, timeSeconds);
     gl.uniform2f(u.uJitter, jitter[0], jitter[1]);
-    gl.uniform1f(u.uFovY, (settings.fov * Math.PI) / 180);
+    gl.uniform1f(u.uFovY, fovY);
     gl.uniform1i(u.uMaxSteps, settings.maxSteps);
     gl.uniform1f(u.uBaseStep, settings.baseStep);
     gl.uniform1i(u.uLensing, settings.lensing ? 1 : 0);
@@ -446,11 +540,14 @@ export class SchwarzschildRenderer {
     const historyWriteIndex = 1 - this.historyIndex;
     const historyWrite = this.historyTargets[historyWriteIndex];
     gl.bindFramebuffer(gl.FRAMEBUFFER, historyWrite.framebuffer);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
     gl.useProgram(this.fxaaProgram);
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.sceneTarget.texture);
+    gl.bindTexture(gl.TEXTURE_2D, this.sceneTarget.colorTexture);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, historyRead.texture);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this.sceneTarget.motionTexture);
     gl.uniform2f(
       this.fxaaUniforms.uResolution,
       this.canvas.width,
@@ -466,26 +563,28 @@ export class SchwarzschildRenderer {
     );
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    gl.bindFramebuffer(
-      gl.READ_FRAMEBUFFER,
-      historyWrite.framebuffer,
-    );
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    gl.blitFramebuffer(
-      0,
-      0,
-      this.canvas.width,
-      this.canvas.height,
-      0,
-      0,
-      this.canvas.width,
-      this.canvas.height,
-      gl.COLOR_BUFFER_BIT,
-      gl.NEAREST,
-    );
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.useProgram(this.rcasProgram);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, historyWrite.texture);
+    gl.uniform2f(
+      this.rcasUniforms.uResolution,
+      this.canvas.width,
+      this.canvas.height,
+    );
+    gl.uniform1f(this.rcasUniforms.uSharpness, RCAS_SHARPNESS);
+    gl.enable(gl.DITHER);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.disable(gl.DITHER);
     gl.activeTexture(gl.TEXTURE0);
 
+    this.previousCameraPosition.set(camera.position);
+    this.previousCameraForward.set(camera.forward);
+    this.previousCameraRight.set(camera.right);
+    this.previousCameraUp.set(camera.up);
+    this.previousFovY = fovY;
+    this.previousSceneTime = timeSeconds;
+    this.hasPreviousCamera = true;
     this.historyIndex = historyWriteIndex;
     this.historyValid = true;
     this.frameIndex += 1;

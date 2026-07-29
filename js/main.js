@@ -7,9 +7,9 @@ import { SchwarzschildRenderer } from "./webgl.js";
 
 const QUALITY_PROFILES = {
   low: { maxSteps: 256, scale: 0.52, maxPixels: 750_000 },
-  medium: { maxSteps: 320, scale: 0.68, maxPixels: 1_200_000 },
-  high: { maxSteps: 416, scale: 0.86, maxPixels: 2_000_000 },
-  ultra: { maxSteps: 896, scale: 1.0, maxPixels: 3_800_000 },
+  medium: { maxSteps: 320, scale: 0.78, maxPixels: 1_500_000 },
+  high: { maxSteps: 416, scale: 1.0, maxPixels: 2_600_000 },
+  ultra: { maxSteps: 896, scale: 1.15, maxPixels: 4_200_000 },
 };
 
 const CAPTURE_RHO = 0.515;
