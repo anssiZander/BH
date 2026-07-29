@@ -31,6 +31,8 @@ const float TAU = 6.28318530717958647692;
 const float M = 1.0;
 const float CAPTURE_RHO = 0.515;
 const float PHOTON_RHO = 1.8660254037844386;
+const float STATION_BAND_CENTER_LATITUDE = 0.25;
+const float STATION_ENVELOPE_HALF_ANGLE = 0.19;
 const float CRITICAL_IMPACT = 5.196152422706632;
 const float ESCAPE_RHO = 36.0;
 const int HARD_MAX_STEPS = 896;
@@ -43,6 +45,29 @@ const float SHELL_RADII[SHELL_COUNT] = float[](
 
 float saturate(float value) {
     return clamp(value, 0.0, 1.0);
+}
+
+float stationBandEnvelope(vec3 point) {
+    float stationRadius = length(point);
+    float stationLatitude = asin(
+        clamp(
+            abs(point.y) / max(stationRadius, 1e-8),
+            0.0,
+            1.0
+        )
+    );
+    float angularEnvelope =
+        stationRadius
+        * sin(
+            abs(
+                stationLatitude
+                - STATION_BAND_CENTER_LATITUDE
+            )
+            - STATION_ENVELOPE_HALF_ANGLE
+        );
+    float radialEnvelope =
+        abs(stationRadius - PHOTON_RHO) - 0.11;
+    return max(radialEnvelope, angularEnvelope);
 }
 
 float opticalIndex(float rho) {
@@ -86,39 +111,11 @@ float adaptiveStep(vec3 point) {
         }
     }
 
-    // The literal source station has one photon-sphere ring, four spokes, a
-    // central hub, and a narrow communications mast. These conservative
-    // envelopes refine all of them without forcing tiny steps through the
-    // otherwise empty bounding sphere.
+    // The station follows two mirrored spherical latitude bands. This
+    // conservative envelope refines both bands while leaving the equatorial
+    // view corridor and the rest of the bounding sphere empty.
     if (uRingsVisible) {
-        float cylindricalRadius = length(point.xz);
-        float ringEnvelope =
-            max(
-                abs(cylindricalRadius - PHOTON_RHO) - 0.11,
-                abs(point.y) - 0.34
-            );
-        float xSpokeEnvelope =
-            max(
-                max(abs(point.x) - 2.03, abs(point.y) - 0.12),
-                abs(point.z) - 0.14
-            );
-        float zSpokeEnvelope =
-            max(
-                max(abs(point.z) - 2.03, abs(point.y) - 0.12),
-                abs(point.x) - 0.14
-            );
-        float hubEnvelope =
-            max(cylindricalRadius - 0.34, abs(point.y) - 0.30);
-        float mastEnvelope =
-            max(
-                cylindricalRadius - 0.20,
-                abs(point.y + 0.95) - 0.95
-            );
-        float stationEnvelope =
-            min(
-                min(ringEnvelope, min(xSpokeEnvelope, zSpokeEnvelope)),
-                min(hubEnvelope, mastEnvelope)
-            );
+        float stationEnvelope = stationBandEnvelope(point);
         float stationBlend =
             smoothstep(0.025, 0.20, max(stationEnvelope, 0.0));
         rayStep = min(rayStep, mix(0.010, rayStep, stationBlend));
@@ -334,28 +331,7 @@ bool opaqueSphereBeforeEvent(
 
 
 float stationEnvelopeDistance(vec3 point) {
-    float cylindricalRadius = length(point.xz);
-    float ringEnvelope =
-        max(
-            abs(cylindricalRadius - PHOTON_RHO) - 0.11,
-            abs(point.y) - 0.34
-        );
-    float xSpokeEnvelope =
-        stationSdBox(point, vec3(2.03, 0.12, 0.14));
-    float zSpokeEnvelope =
-        stationSdBox(point, vec3(0.14, 0.12, 2.03));
-    float hubEnvelope =
-        max(cylindricalRadius - 0.34, abs(point.y) - 0.30);
-    float mastEnvelope =
-        stationSdBox(
-            point - vec3(0.0, -0.95, 0.0),
-            vec3(0.20, 0.95, 0.20)
-        );
-    return
-        min(
-            min(ringEnvelope, min(xSpokeEnvelope, zSpokeEnvelope)),
-            min(hubEnvelope, mastEnvelope)
-        );
+    return stationBandEnvelope(point);
 }
 
 float dysonScene(vec3 point) {
@@ -504,7 +480,7 @@ vec3 stationSurfaceMaterial(
         textureColor = vec3(0.6, 0.42, 0.05) * 0.755;
         specular = 0.1;
     } else if (materialId == STATION_MAT_SIDE_WINDOWS) {
-        vec3 cylindrical = stationCylTransform(sourcePoint);
+        vec3 cylindrical = stationBandTransform(sourcePoint);
         float grid =
             max(
                 abs(fract(cylindrical.x * 16.0) * 2.0 - 1.0),
@@ -514,7 +490,7 @@ vec3 stationSurfaceMaterial(
         textureColor = vec3(0.5, 0.7, 1.0) * grid;
         specular = 0.2;
     } else if (materialId == STATION_MAT_FLOOR) {
-        vec3 cylindrical = stationCylTransform(sourcePoint);
+        vec3 cylindrical = stationBandTransform(sourcePoint);
         vec3 panelNormal;
         if (length(sourcePoint) > 7.0) {
             cylindrical.xy *= vec2(16.0, 4.0);
@@ -537,7 +513,7 @@ vec3 stationSurfaceMaterial(
             textureColor = vec3(0.4);
         }
     } else if (materialId == STATION_MAT_DOME) {
-        vec3 cylindrical = stationCylTransform(sourcePoint);
+        vec3 cylindrical = stationBandTransform(sourcePoint);
         textureColor *= vec3(0.91, 0.97, 0.998) * 0.8;
         float windows =
             saturate(
@@ -553,10 +529,12 @@ vec3 stationSurfaceMaterial(
     }
 
     float sourceNoise = 0.0;
+    vec3 noisePoint = sourcePoint;
+    noisePoint.y = abs(noisePoint.y);
     float doubler = 1.0;
     for (int octave = 0; octave < 4; ++octave) {
         sourceNoise +=
-            stationNoise(sourcePoint * 8.0 * doubler)
+            stationNoise(noisePoint * 8.0 * doubler)
             / doubler;
         doubler *= 2.0;
     }

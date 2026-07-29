@@ -8,11 +8,12 @@
 - **License:** CC0 public-domain dedication in the shader source
 - **Use in this project:** The active station object map and procedural material
   helpers were ported into `shaders/orbital_station.glsl`, with source symbols
-  namespaced for this renderer. The single source-radius-8 station is uniformly
-  scaled by the Schwarzschild photon-sphere radius divided by 8. Its CityBlock
-  greebles, panel shader, edge lattice, hub, four spokes, trusses, dishes,
-  material IDs, noise, normals, ambient occlusion, and directional-shadow
-  method are retained.
+  namespaced for this renderer. The source-radius-8 ring hull is uniformly
+  scaled by the Schwarzschild photon-sphere radius divided by 8, curved along
+  spherical latitude, and mirrored above and below a clear equatorial gap. Its
+  CityBlock greebles, panel shader, edge lattice, material IDs, noise, normals,
+  ambient occlusion, and directional-shadow method are retained. The source
+  hub, four radial spokes, central trusses, mast, and dishes are omitted.
 
 No image or texture from the Shadertoy project is bundled or sampled at runtime.
 The original camera, Earth texture, temporal buffers, FSR, and post-processing
@@ -81,5 +82,17 @@ image-generation tool on 28 July 2026 from an offscreen frame of the literal
 single-station build. The prompt required exactly one flat, densely greebled
 ring, four radial spokes, a centered black-hole shadow, neutral hull materials,
 sparse service accents, deep space, and no text, logo, watermark, planet,
-accretion disk, neon, extra bands, or radius-based color coding. It is used
-only for Open Graph and Twitter cards and is not sampled by the WebGL renderer.
+accretion disk, neon, extra bands, or radius-based color coding. It is retained
+as an unused legacy asset and is not sampled by the WebGL renderer.
+
+### `assets/social-preview-photon-bands.png`
+
+Project-owned 1730 × 909 social preview generated with OpenAI's built-in
+image-generation tool on 29 July 2026 by editing the preceding single-station
+card. The prompt preserved the centered black-hole shadow, deep star field,
+neutral greebled panels, gold edge rails, and wide composition while requiring
+exactly two mirrored spherical station bands, one above and one below a fully
+open equatorial corridor. It explicitly prohibited radial spokes, center-facing
+pipes, hub attachments, masts, antennas, dishes, accretion disks, text, logos,
+watermarks, planets, neon radius colors, and any third band. It is used only for
+Open Graph and Twitter cards and is not sampled by the WebGL renderer.

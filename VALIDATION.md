@@ -1,9 +1,9 @@
 # Validation record
 
-The measurements below were recorded on 28 July 2026. The numerical-optics
-section remains the baseline for the unchanged ray equation. The final section
-records the fresh compile, render, seam, opacity, toggle, source/distribution,
-HTTP, and performance pass for the replacement orbital-station geometry.
+The baseline measurements below were recorded on 28 July 2026. The
+numerical-optics section remains the baseline for the unchanged ray equation.
+The final section records the 29 July 2026 source, geometry, envelope, compile,
+distribution, HTTP, and share-image checks for the twin station-band revision.
 
 ## Recorded baseline: runtime and rendering
 
@@ -84,59 +84,46 @@ adaptive step policy.
 - Grid crossings use local segment/sphere roots with tangent coverage; step
   refinement remains active throughout a widened band around every visible shell.
 
-## Orbital-station validation
+## Twin station-band validation
 
-- `shaders/orbital_station.glsl` contains the complete active CC0 station map
-  from Shadertoy `X33BRn`, with namespaced symbols and a world wrapper. The
-  CityBlock branches, panels, rails, cross-lattice, four spokes, hub, ladder
-  struts, communications truss, repeated dishes, packed material IDs, noise,
-  six-sample ambient occlusion, and 40-step source shadow method are active.
-- The source ring radius `8` is uniformly scaled by
-  `PHOTON_RHO / 8 = 0.233253175`, without translation or axis rotation. The
-  black hole therefore remains at the original station hub and the sole
-  cylindrical ring is centered at isotropic photon radius
-  `ρ = 1.8660254038M`.
-- A 512-sample SDF scan away from the spoke axes at `y = 0.08M` found occupied
-  ring material only over `ρ = 1.8406738M` through `1.8939941M`, with the
-  deepest sample at `1.8673340M`. Distances at the superseded inner and outer
-  band radii were positive (`0.39590M` at `1.30901699M` and `0.48830M` at
-  `2.39564392M`), confirming that no extra concentric station bands remain.
-- The assembled source shader compiled and linked in a standalone OpenGL 3.3
-  context after only the version/precision compatibility conversion. A
-  separate station-material probe was finite across all sampled pixels and
-  returned the expected active material families.
-- Lensed, flat, elevated, edge-on, outer-face, inner-face, grazing, and close
-  frames were inspected. They show one broad, flat cylindrical station with
-  the source's dense physical surface relief and sparse service colors, rather
-  than the retired pipe-like or radius-colored approximations.
-- A close frame centered on the `atan` longitude seam shows continuous hull,
-  panels, rail, and shading. Axis and radial diagnostic evaluations were
-  finite; explicit zero-length normalization guards cover the two singular
-  procedural-normal cases.
-- Station hits are fully opaque and retain first-hit depth ordering. Close
-  grid/station and opaque-sphere/station frames show nearer surfaces retained
-  and farther ones rejected without the former translucent overlap fringe.
-- With black sky and grids/spheres disabled, the warmed 960 × 600 lensed
-  station frame contained 17,898 nonblack pixels. Turning `uRingsVisible` off
-  produced zero nonblack pixels and changed exactly those 17,898 pixels. Static
-  inspection confirms the independent
-  `ringsVisibleInput` -> setting -> `uRingsVisible` chain.
-- On the NVIDIA GeForce RTX 4070 Laptop GPU, warmed standalone medians at
-  960 × 600 were approximately `10.81 ms` for the lensed station alone and
-  `18.94 ms` for the default lensed grids, sky, and station. These timings
-  exclude browser composition.
-- The new 1200 × 630 photon-station social card was inspected for one ring,
-  four spokes, neutral materials, centered black-hole shadow, absence of text,
-  and absence of extra bands.
-- Source and distribution HTML, CSS, three JavaScript modules, three shader
-  files, the sky texture, and the photon-station social card are byte-identical.
-  All source/distribution modules plus the Worker entry parsed successfully as
-  ES modules. Local HTTP returned `200` for every one of those runtime assets
-  from both the source and distribution roots.
-- The attached browser pool was empty after one documented connection retry, so
-  a real browser-console, pointer-lock, resize, and control-interaction pass
-  remains an explicitly recorded environment limitation rather than a claimed
-  success. The production URL and asset responses are checked after publish.
+The checks in this section were recorded on 29 July 2026 for the curved,
+mirrored station-band revision.
+
+- The active station scene retains the CityBlock hull relief, procedural panels,
+  side windows, edge rails, and cross-lattice, then ends. Static inspection
+  confirms that the active scene no longer calls the source radial cylinders,
+  hub plates, ladder rails, central trusses, mast, or dishes.
+- The folded spherical mapping centers exact geometry and material copies at
+  latitudes `±0.25` radians (`±14.3239°`) on the photon sphere. Each nominal
+  band spans `14.3239°`, with inner edges at `±7.1620°` and outer edges at
+  `±21.4859°`. The resulting nominal equatorial corridor is `14.3239°` wide,
+  or approximately `0.46529M` between inner edges at the photon radius.
+- Both shader and CPU stepping code use the same sine-based angular-cone
+  envelope with a conservative `0.19`-radian half-angle. A deterministic
+  100,000-point scan produced zero upper/lower mirror error, no nonfinite
+  values, and a maximum central finite-difference gradient norm of
+  `1.0000000105`, within numerical tolerance of the envelope's unit-Lipschitz
+  bound. The equatorial envelope distance at the photon radius is
+  `0.11189436M`, safely outside the exact-station evaluation threshold.
+- The exact runtime marker replacement produced a 67,838-byte fragment shader
+  with SHA-256
+  `97a17441963c75deb956f2b33a941b36ccc2d370a53515618a2e305f2670db54`.
+  Chrome 150's ANGLE OpenGL ES 3.0 implementation compiled the vertex and
+  assembled fragment shaders and linked the program successfully with empty
+  compiler and linker logs. A headless WebGL2 startup smoke test also reached
+  `6000×3000 sky loaded · optics stable`.
+- All three source JavaScript modules and the distribution Worker parse without
+  syntax errors. Static shader assembly found balanced delimiters, one injection
+  marker, all 49 referenced station functions defined, and no off-ring geometry
+  tokens in the active station scene.
+- All 16 source/distribution runtime file pairs are byte-identical. Local HTTP
+  returned `200` for the source and distribution HTML, modules, shaders, sky
+  texture, and new station-band social card.
+- The 1730 × 909 share image was inspected for exactly two curved neutral-metal
+  bands, a centered black-hole shadow, a fully clear equatorial corridor, no
+  radial spokes or center mast, and no text, logo, or watermark.
+- No interactive pointer-lock, resize, or rendered-frame screenshot pass was
+  performed for this revision; none is represented here as a success.
 
 The simulation remains an educational real-time approximation. The thinnest
 critical set can exhaust even the Ultra budget and is handled with a stable,

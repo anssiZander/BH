@@ -2,17 +2,20 @@
  * CC0 geometry port from ShaderToy X33BRn, "[TAA] Orbital Megastructure"
  * by morimea, based on WlKXzm, "Orbital Megastructure" by Otavio Good.
  *
- * This file mechanically preserves the active station geometry and its
- * procedural material helpers. Camera state, Earth/environment rendering,
- * TAA, FSR, post-processing, and commented or otherwise dead geometry from
- * the ShaderToy source are intentionally omitted.
+ * This file preserves the source ring hull and procedural material helpers,
+ * then folds the band over spherical latitude and mirrors it across the
+ * equator. The source hub, radial spokes, communications mast, and dishes are
+ * intentionally omitted along with camera state, Earth/environment rendering,
+ * TAA, FSR, post-processing, and otherwise dead geometry.
  *
- * Inclusion contract: PI, PHOTON_RHO, and saturate(float) are defined first.
+ * Inclusion contract: PI, PHOTON_RHO, STATION_BAND_CENTER_LATITUDE, and
+ * saturate(float) are defined first.
  */
 
 const float STATION_SCALE = PHOTON_RHO / 8.0;
 const float STATION_ROT_SPEED = -0.05;
 const float STATION_TIME_OLD = 0.0;
+const float STATION_BAND_HALF_ARC = 1.0;
 
 const uint STATION_MAT_FLOOR = 1u;
 const uint STATION_MAT_WALL = 2u;
@@ -432,11 +435,25 @@ float stationTruss(
     );
 }
 
-vec3 stationCylTransform(vec3 point) {
-    vec3 result = point;
-    result.x = 26.0 * (atan(point.z, point.x) / PI);
-    result.z = length(point.xz);
-    return result;
+vec3 stationBandTransform(vec3 point) {
+    float sphereRadius = max(length(point), 1e-8);
+    float equatorialRadius = length(point.xz);
+    float longitude =
+        equatorialRadius > 1e-8
+        ? atan(point.z, point.x)
+        : 0.0;
+    float latitude = asin(
+        clamp(point.y / sphereRadius, -1.0, 1.0)
+    );
+    return vec3(
+        26.0 * (longitude / PI),
+        sphereRadius
+            * (
+                abs(latitude)
+                - STATION_BAND_CENTER_LATITUDE
+            ),
+        sphereRadius
+    );
 }
 
 uint stationSetMatRgb(uint red, uint green, uint blue) {
@@ -823,7 +840,8 @@ void stationDistanceToObjectSource(
     );
 
     float density = 8.0;
-    vec3 cylindrical = stationCylTransform(point);
+    vec3 bandCoordinates = stationBandTransform(point);
+    vec3 cylindrical = bandCoordinates;
     cylindrical.x *= density;
 
     const float scale = 1.0;
@@ -831,7 +849,6 @@ void stationDistanceToObjectSource(
     cylindrical = cylindrical.yzx / scaleDenominator;
     cylindrical.z *= scaleDenominator;
     cylindrical.y -= 8.0 * density;
-    vec3 basicCylinder = cylindrical;
     cylindrical.y = abs(cylindrical.y) - 1.0;
 
     vec3 repeated = cylindrical;
@@ -857,7 +874,7 @@ void stationDistanceToObjectSource(
     stationMatMax(
         distanceValue,
         material,
-        abs(point.y) - 1.0,
+        abs(bandCoordinates.y) - STATION_BAND_HALF_ARC,
         STATION_MAT_SIDE_WINDOWS
     );
 
@@ -916,284 +933,6 @@ void stationDistanceToObjectSource(
         material,
         geometryDistance,
         STATION_MAT_SPOKE
-    );
-
-    geometryDistance = length(
-        stationRepeatX(
-            basicCylinder.xy + vec2(-7.25, 59.2),
-            0.4
-        )
-    ) - 0.05;
-    geometryDistance = max(
-        geometryDistance,
-        abs(point.y) - 0.91
-    );
-    geometryDistance *= scaleDenominator;
-    stationMatMin(
-        distanceValue,
-        material,
-        geometryDistance,
-        STATION_MAT_PIPE
-    );
-
-    geometryDistance = stationSdBox(
-        stationFlipZ(
-            point + vec3(0.0, -0.57, 0.0),
-            0.58
-        ),
-        vec3(0.25, 0.29, 0.03)
-    ) - 0.008;
-    secondDistance = stationSdBox(
-        stationFlipX(
-            point + vec3(0.0, -0.57, 0.0),
-            0.58
-        ),
-        vec3(0.03, 0.29, 0.25)
-    ) - 0.008;
-    stationMatMin(
-        distanceValue,
-        material,
-        min(geometryDistance, secondDistance),
-        STATION_MAT_FLOOR
-    );
-
-    geometryDistance = stationTruss(
-        abs(point.xyz + vec3(0.0, -0.78, 0.0))
-            - vec3(0.25, 0.08, 0.4),
-        0.005,
-        0.0025,
-        0.175,
-        0.025
-    );
-    stationMatMin(
-        distanceValue,
-        material,
-        geometryDistance,
-        STATION_MAT_PIPE
-    );
-    geometryDistance = stationTruss(
-        abs(point.zyx + vec3(0.0, -0.78, 0.0))
-            - vec3(0.25, 0.08, 0.4),
-        0.005,
-        0.0025,
-        0.175,
-        0.025
-    );
-    stationMatMin(
-        distanceValue,
-        material,
-        geometryDistance,
-        STATION_MAT_PIPE
-    );
-
-    float ridge = clamp(
-        abs(fract(point.z * 4.0) - 0.5),
-        0.05,
-        0.1
-    ) * 0.125;
-    float spokeDistance = stationCappedCylinder(
-        abs(point.xyz) - vec3(0.25, 0.0, 0.0),
-        0.125,
-        8.0 * scale
-    ) + ridge;
-    stationMatMin(
-        distanceValue,
-        material,
-        spokeDistance,
-        ridge > 0.01249
-            ? STATION_MAT_SPOKE
-            : STATION_MAT_GLOSSY_ROUGH
-    );
-
-    ridge = clamp(
-        abs(fract(point.x * 4.0) - 0.5),
-        0.05,
-        0.1
-    ) * 0.125;
-    spokeDistance = stationCappedCylinder(
-        abs(point.zyx) - vec3(0.25, 0.0, 0.0),
-        0.125,
-        8.0 * scale
-    ) + ridge;
-    stationMatMin(
-        distanceValue,
-        material,
-        spokeDistance,
-        ridge > 0.01249
-            ? STATION_MAT_SPOKE
-            : STATION_MAT_GLOSSY_ROUGH
-    );
-
-    ridge = clamp(
-        abs(fract(point.y * 1.44 + 0.5) - 0.5),
-        0.25,
-        0.3
-    ) * 0.75;
-    geometryDistance =
-        length(point.xz)
-        - saturate(1.09 - abs(point.y * 0.2))
-        + ridge;
-    geometryDistance = max(
-        geometryDistance,
-        abs(point.y) - 0.9
-    );
-    float subtractionDistance = length(point.xz) - 0.6;
-    subtractionDistance = max(
-        subtractionDistance,
-        abs(abs(point.y - 1.0)) - 0.6
-    );
-    geometryDistance = max(
-        geometryDistance,
-        -subtractionDistance
-    );
-    stationMatMin(
-        distanceValue,
-        material,
-        geometryDistance,
-        STATION_MAT_FLOOR
-    );
-
-    geometryDistance = stationSdBox(
-        stationFlipZ(
-            point + vec3(0.0, -0.5, 0.0),
-            0.59
-        ),
-        vec3(0.25, 0.1, 0.05)
-    ) - 0.001;
-    secondDistance = stationSdBox(
-        stationFlipX(
-            point + vec3(0.0, -0.5, 0.0),
-            0.59
-        ),
-        vec3(0.05, 0.1, 0.25)
-    ) - 0.001;
-    stationMatMax(
-        distanceValue,
-        material,
-        -min(geometryDistance, secondDistance),
-        STATION_MAT_PIPE
-    );
-
-    const float spokeLength = 8.0 * scale;
-    repeatedCoordinate = stationRepeat(point.x, 0.25);
-    geometryDistance =
-        length(vec2(repeatedCoordinate, abs(point.y))) - 0.015;
-    geometryDistance = max(
-        geometryDistance,
-        length(point.xz) - spokeLength
-    );
-    geometryDistance = max(
-        geometryDistance,
-        abs(point.z) - 0.25
-    );
-    stationMatMin(
-        distanceValue,
-        material,
-        geometryDistance,
-        STATION_MAT_SPOKE
-    );
-
-    repeatedCoordinate = stationRepeat(point.z, 0.25);
-    geometryDistance =
-        length(vec2(repeatedCoordinate, abs(point.y))) - 0.015;
-    geometryDistance = max(
-        geometryDistance,
-        length(point.xz) - spokeLength
-    );
-    geometryDistance = max(
-        geometryDistance,
-        abs(point.x) - 0.25
-    );
-    stationMatMin(
-        distanceValue,
-        material,
-        geometryDistance,
-        STATION_MAT_SPOKE
-    );
-
-    rotated = stationRotateY(point, PI * 0.25);
-    repeatedCoordinate =
-        stationRepeat(rotated.z + 0.09, 0.25 * 0.707);
-    geometryDistance =
-        length(vec2(repeatedCoordinate, abs(rotated.y)))
-        - 0.015;
-    geometryDistance = max(
-        geometryDistance,
-        length(point.xz) - spokeLength
-    );
-    geometryDistance = max(
-        geometryDistance,
-        abs(point.x) - 0.25
-    );
-    stationMatMin(
-        distanceValue,
-        material,
-        geometryDistance,
-        STATION_MAT_SPOKE
-    );
-
-    repeatedCoordinate =
-        stationRepeat(rotated.x + 0.09, 0.25 * 0.707);
-    geometryDistance =
-        length(vec2(repeatedCoordinate, abs(rotated.y)))
-        - 0.015;
-    geometryDistance = max(
-        geometryDistance,
-        length(point.xz) - spokeLength
-    );
-    geometryDistance = max(
-        geometryDistance,
-        abs(point.z) - 0.25
-    );
-    stationMatMin(
-        distanceValue,
-        material,
-        geometryDistance,
-        STATION_MAT_SPOKE
-    );
-
-    point = stationRotateY(
-        point,
-        -STATION_ROT_SPEED * STATION_TIME_OLD
-    );
-
-    geometryDistance = stationTruss(
-        point.xzy + vec3(0.0, 0.0, 4.0),
-        0.015,
-        0.0075,
-        3.535,
-        0.05
-    );
-    stationMatMin(
-        distanceValue,
-        material,
-        geometryDistance,
-        STATION_MAT_GLOSSY_ROUGH
-    );
-
-    stationDish(
-        stationRepeatY(
-            stationRotateY(
-                point,
-                sin(
-                    floor(point.y / 0.666 + 0.5) * 1.73
-                    + STATION_TIME_OLD * 0.1
-                )
-            ) + vec3(0.0, 4.9, 0.0),
-            0.666
-        ),
-        temporaryDistance,
-        temporaryMaterial
-    );
-    temporaryDistance = max(
-        temporaryDistance,
-        stationFlip(point.y + 4.9, 2.666)
-    );
-    stationMatMin(
-        distanceValue,
-        material,
-        temporaryDistance,
-        temporaryMaterial
     );
 }
 

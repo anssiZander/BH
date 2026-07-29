@@ -3,8 +3,8 @@
 A framework-free, real-time WebGL2 visualization of light propagation around a
 nonrotating Schwarzschild black hole. The scene contains no accretion disk:
 everything visible is the lensed sky, shaded spherical reference skins,
-spherical coordinate grids, or one optional ray-marched orbital megastructure
-centered on the equatorial photon sphere.
+spherical coordinate grids, or two optional ray-marched orbital-station bands
+curved around the photon sphere.
 
 ## Run it
 
@@ -32,7 +32,7 @@ The instrument panel controls RK2 integration quality, base ray step, flight
 speed, field of view, grid brightness, shell count, exposure, saturation, and
 the internal render resolution. Lensing, shaded spheres, spherical grids, the
 sky sphere, and the orbital-station structure can each be disabled
-independently. The station control is labeled `Dyson ring` in the interface.
+independently. The station control is labeled `Station bands` in the interface.
 Sphere skins start disabled so the enclosed station is visible on first load.
 
 ## What the radii mean
@@ -40,7 +40,7 @@ Sphere skins start disabled so the enclosed station is visible on first load.
 The mass is set to `M = 1` with `G = c = 1`. The event horizon is at the
 Schwarzschild areal radius `r = 2M`; rays reaching a small numerical margin
 outside its isotropic-coordinate radius `ρ = M/2` are captured and returned
-black. The highlighted yellow grid and orbital-station ring share the
+black. The highlighted yellow grid and orbital-station bands share the
 photon-sphere radius `r = 3M`, or `ρ = (2 + √3)M/2`. It is not the horizon.
 
 The apparent black shape is the captured-ray region, commonly called the black
@@ -86,24 +86,25 @@ silhouette shading establish surface direction and depth. Both the inner and
 outer faces are fully opaque. The `Spheres` and `Grids` switches are independent;
 switching `Spheres` off restores the unfilled grid view.
 
-One opaque procedural orbital station occupies the equatorial photon sphere at
-areal radius `r = 3M`, corresponding to isotropic radius
-`ρ/M = 1.86602540`. Its fragment-shader scene is a uniform-scale port of the
-active station map from morimea's CC0
+Two opaque procedural station bands curve along the photon sphere at areal
+radius `r = 3M`, corresponding to isotropic radius `ρ/M = 1.86602540`. Their
+fragment-shader scene adapts the ring map from morimea's CC0
 [*\[TAA\] Orbital Megastructure*](https://www.shadertoy.com/view/X33BRn).
-The source ring radius `8` is scaled by `ρphoton / 8`, while its origin and axis
-remain unchanged so the black hole lies at the hub.
+The source radius `8` is scaled by `ρphoton / 8`. A folded spherical-latitude
+mapping creates exact mirrored copies centered at `±0.25` radians
+(`±14.32°`), each spanning about `14.32°`. This leaves a clear equatorial
+corridor about `14.32°` wide between their inner edges.
 
-The port retains the source's complete CityBlock hull relief, dense procedural
-panel material, edge rails and cross-lattice, four main spokes, central hub,
-ladder struts, communications truss, repeated dishes, material IDs, noise,
-finite-difference normals, ambient occlusion, and directional shadowing. Camera,
-Earth, temporal-antialiasing, FSR, and post-processing passes from the
-Shadertoy are not imported; the existing Schwarzschild camera, lensed sky, and
-tone mapper remain in control. The `Dyson ring` switch disables this complete
-station independently of spheres and grids. Because sphere skins are opaque,
-an enabled skin naturally occludes station geometry behind it; disable
-`Spheres` to inspect the complete structure.
+The adaptation retains the source CityBlock hull relief, dense procedural panel
+material, band-edge rails and cross-lattice, material IDs, noise,
+finite-difference normals, ambient occlusion, and directional shadowing. The
+four center-facing spokes, central hub, ladder struts, communications mast, and
+repeated dishes are omitted. Camera, Earth, temporal-antialiasing, FSR, and
+post-processing passes from the Shadertoy are not imported; the existing
+Schwarzschild camera, lensed sky, and tone mapper remain in control. The
+`Station bands` switch disables both bands independently of spheres and grids.
+Because sphere skins are opaque, an enabled skin naturally occludes station
+geometry behind it; disable `Spheres` to inspect the complete structure.
 
 ## Quality and performance
 

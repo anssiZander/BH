@@ -14,6 +14,8 @@ const QUALITY_PROFILES = {
 
 const CAPTURE_RHO = 0.515;
 const PHOTON_RHO = (2 + Math.sqrt(3)) / 2;
+const STATION_BAND_CENTER_LATITUDE = 0.25;
+const STATION_ENVELOPE_HALF_ANGLE = 0.19;
 const ESCAPE_RHO = 36;
 const SHELL_RADII = [
   0.93166248, 1.30901699, 1.8660254, 2.39564392,
@@ -215,6 +217,22 @@ function smoothstep(edge0, edge1, value) {
   return t * t * (3 - 2 * t);
 }
 
+function stationBandEnvelope(position) {
+  const stationRadius = Math.hypot(...position);
+  const stationLatitude = Math.asin(
+    Math.max(
+      0,
+      Math.min(1, Math.abs(position[1]) / Math.max(stationRadius, 1e-8)),
+    ),
+  );
+  const angularEnvelope = stationRadius * Math.sin(
+    Math.abs(stationLatitude - STATION_BAND_CENTER_LATITUDE)
+      - STATION_ENVELOPE_HALF_ANGLE,
+  );
+  const radialEnvelope = Math.abs(stationRadius - PHOTON_RHO) - 0.11;
+  return Math.max(radialEnvelope, angularEnvelope);
+}
+
 function probeStepSize(
   position,
   baseStep,
@@ -236,36 +254,7 @@ function probeStepSize(
   }
 
   if (ringsVisible) {
-    const cylindricalRadius = Math.hypot(position[0], position[2]);
-    const ringEnvelope = Math.max(
-      Math.abs(cylindricalRadius - PHOTON_RHO) - 0.11,
-      Math.abs(position[1]) - 0.34,
-    );
-    const xSpokeEnvelope = Math.max(
-      Math.abs(position[0]) - 2.03,
-      Math.abs(position[1]) - 0.12,
-      Math.abs(position[2]) - 0.14,
-    );
-    const zSpokeEnvelope = Math.max(
-      Math.abs(position[2]) - 2.03,
-      Math.abs(position[1]) - 0.12,
-      Math.abs(position[0]) - 0.14,
-    );
-    const hubEnvelope = Math.max(
-      cylindricalRadius - 0.34,
-      Math.abs(position[1]) - 0.3,
-    );
-    const mastEnvelope = Math.max(
-      cylindricalRadius - 0.2,
-      Math.abs(position[1] + 0.95) - 0.95,
-    );
-    const stationEnvelope = Math.min(
-      ringEnvelope,
-      xSpokeEnvelope,
-      zSpokeEnvelope,
-      hubEnvelope,
-      mastEnvelope,
-    );
+    const stationEnvelope = stationBandEnvelope(position);
     const stationBlend = smoothstep(
       0.025,
       0.2,
