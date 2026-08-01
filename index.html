@@ -42,6 +42,12 @@
       <canvas id="glCanvas" aria-label="Interactive Schwarzschild black-hole visualization"></canvas>
 
       <div class="vignette" aria-hidden="true"></div>
+      <div
+        id="photonSphereIndicator"
+        class="photon-sphere-indicator"
+        data-in-view="false"
+        aria-hidden="true"
+      >Photon Sphere</div>
       <div class="crosshair" aria-hidden="true"><span></span><span></span></div>
 
       <header class="brand-panel glass-panel">
@@ -158,6 +164,11 @@
               <input id="ringsVisibleInput" type="checkbox" checked />
               <span class="switch-track"><span></span></span>
               <span>Station bands</span>
+            </label>
+            <label class="switch-control">
+              <input id="photonIndicatorInput" type="checkbox" checked />
+              <span class="switch-track"><span></span></span>
+              <span>Photon label</span>
             </label>
           </div>
 

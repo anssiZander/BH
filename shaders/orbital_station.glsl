@@ -515,12 +515,21 @@ vec3 stationBandTransform(vec3 point) {
         foldedLatitude - STATION_INNER_BAND_LATITUDE;
     float outerBandOffset =
         foldedLatitude - STATION_OUTER_BAND_LATITUDE;
+    bool outerBand =
+        abs(outerBandOffset) < abs(innerBandOffset);
     float nearestBandOffset =
-        abs(innerBandOffset) < abs(outerBandOffset)
-        ? innerBandOffset
-        : outerBandOffset;
+        outerBand ? outerBandOffset : innerBandOffset;
+    // Offset the repeating longitudinal city cells independently for all four
+    // bands so their hull panels, rails, and greebles do not form aligned rows.
+    float bandPhase = 0.0;
+    if (latitude < 0.0) {
+        bandPhase += 0.173;
+    }
+    if (outerBand) {
+        bandPhase += 0.347;
+    }
     return vec3(
-        26.0 * (longitude / PI),
+        26.0 * (longitude / PI) + bandPhase,
         sphereRadius * nearestBandOffset,
         sphereRadius
     );

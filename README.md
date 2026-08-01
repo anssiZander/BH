@@ -29,6 +29,8 @@ The shader files and local sky texture are loaded with `fetch()`, so opening
 - Escape: release pointer lock
 - Station rotation: continuously adjusts the four bands from stopped to the
   original `0.015`-radian-per-second speed
+- Photon label: fades a translucent yellow Orbitron `PHOTON SPHERE` indicator
+  in or out at the projected black-hole center
 
 The instrument panel controls RK2 integration quality, base ray step, flight
 speed, station rotation, field of view, grid brightness, shell count, exposure,

@@ -183,6 +183,17 @@ implementation measurements in the preceding historical record.
   deceleration response from `30` to `14`, producing longer, smoother starts,
   stops, and camera turns.
 
+## Photon-sphere indicator and band phases (1 August 2026)
+
+- A self-hosted Orbitron face renders the translucent yellow `PHOTON SPHERE`
+  indicator at the projected black-hole center. Its control uses an `850 ms`
+  eased opacity, blur, and scale transition, and the label also fades out when
+  the center leaves the camera view.
+- The four station copies use distinct longitudinal procedural offsets:
+  `0.000`, `0.173`, `0.347`, and `0.520`. Geometry and material evaluation use
+  the same transformed coordinates, preventing their panels, rails, and
+  greebles from lining up between bands.
+
 - The supplied `1452 x 852`, 30 FPS recording contains 80 frames over
   `2.709313` seconds. Lensing is visibly disabled throughout. Registered
   close-up samples show roughly `6-14` pixels of station motion per frame.
