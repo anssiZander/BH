@@ -32,6 +32,8 @@ The shader files and local sky texture are loaded with `fetch()`, so opening
 - Photon label: fades a translucent yellow Orbitron `PHOTON SPHERE` inscription
   in or out on the equator of the lensed photon-sphere surface; its reading
   direction automatically reverses when the camera crosses inside
+- Record MP4: captures the WebGL field at 60 fps and downloads one continuous
+  editor-friendly recording; browsers without MP4 encoding fall back to WebM
 
 The instrument panel controls RK2 integration quality, base ray step, flight
 speed, station rotation, field of view, grid brightness, shell count, exposure,

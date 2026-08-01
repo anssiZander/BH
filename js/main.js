@@ -37,6 +37,9 @@ const radiusMarker = document.querySelector("#radiusMarker");
 const pointerHint = document.querySelector("#pointerHint");
 const statusPill = document.querySelector("#statusPill");
 const statusText = document.querySelector("#statusText");
+const recordButton = document.querySelector("#recordButton");
+const recordButtonText = document.querySelector("#recordButtonText");
+const recordStatus = document.querySelector("#recordStatus");
 const controlsPanel = document.querySelector(".controls-panel");
 const radialLandmarks = document.querySelectorAll("[data-areal-radius]");
 
@@ -67,6 +70,21 @@ let stepCapDetected = false;
 let lastProbeTime = 0;
 let uiHidden = false;
 let photonLabelTarget = 1;
+
+const RECORDING_FPS = 60;
+const RECORDING_VIDEO_BITS_PER_SECOND = 16_000_000;
+const recordingState = {
+  isRecording: false,
+  isFinalizing: false,
+  recorder: null,
+  stream: null,
+  chunks: [],
+  mimeType: "",
+  extension: "mp4",
+  formatLabel: "MP4",
+  startedAt: 0,
+  lastStatusSecond: -1,
+};
 
 function bindRange(inputId, outputId, settingKey, format, onInput) {
   const input = document.querySelector(`#${inputId}`);
@@ -162,6 +180,11 @@ function bindControls() {
 
   document.querySelector("#resetButton").addEventListener("click", resetCamera);
   document.querySelector("#hideUiButton").addEventListener("click", toggleUi);
+  recordButton.addEventListener("click", () => {
+    if (recordingState.isRecording) stopRecording();
+    else startRecording();
+  });
+  updateRecordingIdleUi();
 
   document.querySelector("#collapseControls").addEventListener("click", (event) => {
     const collapsed = controlsPanel.classList.toggle("collapsed");
@@ -188,6 +211,7 @@ function bindControls() {
   document.addEventListener("visibilitychange", () => {
     renderer?.invalidateHistory();
   });
+  window.addEventListener("beforeunload", releaseRecordingStream);
 }
 
 function resetCamera() {
@@ -236,6 +260,168 @@ function updateTelemetry(now) {
   } else {
     statusText.textContent = "SCHWARZSCHILD FIELD · STABLE";
   }
+}
+
+function setRecordingStatus(message) {
+  recordStatus.textContent = message;
+}
+
+function getPreferredRecordingFormat() {
+  if (typeof MediaRecorder === "undefined") return null;
+  const candidates = [
+    { mimeType: 'video/mp4;codecs="avc1.424028"', extension: "mp4", label: "H.264 MP4" },
+    { mimeType: 'video/mp4;codecs="avc1.42E02A"', extension: "mp4", label: "H.264 MP4" },
+    { mimeType: 'video/mp4;codecs="avc1.4D402A"', extension: "mp4", label: "H.264 MP4" },
+    { mimeType: "video/mp4", extension: "mp4", label: "MP4" },
+    { mimeType: 'video/webm;codecs="vp9"', extension: "webm", label: "VP9 WebM" },
+    { mimeType: 'video/webm;codecs="vp8"', extension: "webm", label: "VP8 WebM" },
+    { mimeType: "video/webm", extension: "webm", label: "WebM" },
+  ];
+  return candidates.find(({ mimeType }) =>
+    MediaRecorder.isTypeSupported(mimeType)
+  ) || null;
+}
+
+function releaseRecordingStream() {
+  recordingState.stream?.getTracks().forEach((track) => track.stop());
+  recordingState.stream = null;
+}
+
+function resetRecordingUi() {
+  recordButton.classList.remove("recording");
+  updateRecordingIdleUi();
+}
+
+function updateRecordingIdleUi() {
+  const format = getPreferredRecordingFormat();
+  recordButton.disabled = !format;
+  recordButtonText.textContent =
+    format?.extension === "webm" ? "Record WebM" : "Record MP4";
+  if (format) {
+    setRecordingStatus(`Ready for ${format.label} · ${RECORDING_FPS} fps`);
+  } else {
+    setRecordingStatus("Recording is unavailable in this browser");
+  }
+}
+
+function startRecording() {
+  if (recordingState.isRecording || recordingState.isFinalizing) return;
+  if (
+    typeof MediaRecorder === "undefined"
+    || typeof canvas.captureStream !== "function"
+  ) {
+    setRecordingStatus("Recording is unavailable in this browser");
+    return;
+  }
+
+  const format = getPreferredRecordingFormat();
+  if (!format) {
+    setRecordingStatus("No supported video encoder was found");
+    return;
+  }
+
+  const stream = canvas.captureStream(RECORDING_FPS);
+  if (!stream.getVideoTracks().length) {
+    stream.getTracks().forEach((track) => track.stop());
+    setRecordingStatus("The renderer did not provide a video track");
+    return;
+  }
+
+  let recorder;
+  try {
+    recorder = new MediaRecorder(stream, {
+      mimeType: format.mimeType,
+      videoBitsPerSecond: RECORDING_VIDEO_BITS_PER_SECOND,
+    });
+  } catch (error) {
+    console.error(error);
+    stream.getTracks().forEach((track) => track.stop());
+    setRecordingStatus("The browser could not start its video encoder");
+    return;
+  }
+
+  recordingState.recorder = recorder;
+  recordingState.stream = stream;
+  recordingState.chunks = [];
+  recordingState.mimeType = recorder.mimeType || format.mimeType;
+  recordingState.extension = format.extension;
+  recordingState.formatLabel = format.label;
+  recorder.ondataavailable = (event) => {
+    if (event.data?.size) recordingState.chunks.push(event.data);
+  };
+  recorder.onerror = (event) => {
+    console.error("MediaRecorder error:", event.error || event);
+    setRecordingStatus("Recording failed; stop to finalize available frames");
+  };
+  recorder.onstop = () => {
+    const chunks = recordingState.chunks.slice();
+    const mimeType = recordingState.mimeType;
+    const extension = recordingState.extension;
+    const formatLabel = recordingState.formatLabel;
+    releaseRecordingStream();
+    recordingState.recorder = null;
+    recordingState.chunks = [];
+    recordingState.isFinalizing = false;
+    resetRecordingUi();
+
+    if (!chunks.length) {
+      setRecordingStatus("No recording data was produced");
+      return;
+    }
+
+    const blob = new Blob(chunks, { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `schwarzschild-field-${Date.now()}.${extension}`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setRecordingStatus(
+      `Saved ${formatLabel} · ${(blob.size / 1_048_576).toFixed(1)} MB`,
+    );
+  };
+
+  try {
+    recorder.start();
+  } catch (error) {
+    console.error(error);
+    releaseRecordingStream();
+    recordingState.recorder = null;
+    recordingState.chunks = [];
+    setRecordingStatus("The video encoder could not begin recording");
+    return;
+  }
+
+  recordingState.isRecording = true;
+  recordingState.startedAt = performance.now();
+  recordingState.lastStatusSecond = -1;
+  recordButton.classList.add("recording");
+  recordButtonText.textContent = "Stop recording";
+  setRecordingStatus(`Recording ${format.label} · ${RECORDING_FPS} fps`);
+}
+
+function stopRecording() {
+  if (!recordingState.isRecording || !recordingState.recorder) return;
+  recordingState.isRecording = false;
+  recordingState.isFinalizing = true;
+  recordButton.disabled = true;
+  recordButtonText.textContent = "Finalizing…";
+  setRecordingStatus(`Finalizing ${recordingState.formatLabel}…`);
+  recordingState.recorder.stop();
+}
+
+function updateRecordingStatus(now) {
+  if (!recordingState.isRecording) return;
+  const elapsedSeconds = Math.floor((now - recordingState.startedAt) / 1000);
+  if (elapsedSeconds === recordingState.lastStatusSecond) return;
+  recordingState.lastStatusSecond = elapsedSeconds;
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = String(elapsedSeconds % 60).padStart(2, "0");
+  setRecordingStatus(
+    `Recording ${recordingState.formatLabel} · ${minutes}:${seconds} · ${RECORDING_FPS} fps`,
+  );
 }
 
 function opticalAcceleration(position, direction) {
@@ -657,6 +843,7 @@ function animate(now) {
   smoothedFps += (instantaneousFps - smoothedFps) * 0.035;
   probeCriticalRays(now);
   updateTelemetry(now);
+  updateRecordingStatus(now);
   requestAnimationFrame(animate);
 }
 

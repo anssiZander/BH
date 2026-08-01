@@ -409,6 +409,63 @@ input[type="range"] {
   color: #9da9c1;
 }
 
+.record-button {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.record-dot {
+  width: 7px;
+  height: 7px;
+  border: 1px solid rgba(255, 124, 151, 0.7);
+  border-radius: 50%;
+  background: rgba(255, 93, 130, 0.22);
+  transition: 180ms ease;
+}
+
+.record-button.recording {
+  border-color: rgba(255, 92, 126, 0.5);
+  color: #ffd6df;
+  background: rgba(255, 72, 111, 0.11);
+}
+
+.record-button.recording .record-dot {
+  border-color: #ff6a8b;
+  background: #ff4f77;
+  box-shadow: 0 0 9px rgba(255, 79, 119, 0.85);
+  animation: record-pulse 1.2s ease-in-out infinite;
+}
+
+.record-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.record-status {
+  min-height: 11px;
+  margin-top: 8px;
+  color: #7887a4;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 7px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+@keyframes record-pulse {
+  0%,
+  100% {
+    opacity: 0.58;
+    transform: scale(0.86);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+}
+
 kbd {
   display: inline-grid;
   min-width: 18px;

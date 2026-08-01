@@ -169,7 +169,14 @@
           <div class="button-row">
             <button id="resetButton" class="text-button" type="button">Reset camera <kbd>R</kbd></button>
             <button id="hideUiButton" class="text-button muted" type="button">Hide UI <kbd>H</kbd></button>
+            <button id="recordButton" class="text-button record-button" type="button">
+              <span class="record-dot" aria-hidden="true"></span>
+              <span id="recordButtonText">Record MP4</span>
+            </button>
           </div>
+          <p id="recordStatus" class="record-status" role="status" aria-live="polite">
+            Ready to record at 60 fps
+          </p>
         </div>
       </section>
 

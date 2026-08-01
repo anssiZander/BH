@@ -285,3 +285,12 @@ implementation measurements in the preceding historical record.
 The simulation remains an educational real-time approximation. The thinnest
 critical set can exhaust even the Ultra budget and is handled with a stable,
 impact-parameter-aware fallback instead of being allowed to stall the GPU.
+
+## Canvas recording (1 August 2026)
+
+- The WebGL canvas is captured directly at `60 fps` through `captureStream()`
+  and encoded at a requested `16 Mbps`. H.264 MP4 profiles are preferred,
+  followed by generic MP4, VP9 WebM, VP8 WebM, and generic WebM.
+- Recording uses one continuous `MediaRecorder` segment for reliable MP4
+  finalization. Stopping releases the capture track, downloads a timestamped
+  file, reports its final size, and leaves the renderer running throughout.
