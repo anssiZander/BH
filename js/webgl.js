@@ -103,7 +103,7 @@ function createSkyTexture(gl, image) {
 
 async function createPhotonLabelTexture(gl) {
   try {
-    await document.fonts.load('700 96px "Orbitron"');
+    await document.fonts.load('700 78px "Orbitron"');
   } catch {
     // Canvas falls back cleanly if the local face cannot be decoded.
   }
@@ -113,9 +113,9 @@ async function createPhotonLabelTexture(gl) {
   labelCanvas.height = 256;
   const context = labelCanvas.getContext("2d");
   const label = "PHOTON SPHERE";
-  const spacing = 10;
+  const spacing = 8;
   context.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
-  context.font = '700 96px "Orbitron", sans-serif';
+  context.font = '700 78px "Orbitron", sans-serif';
   context.textAlign = "left";
   context.textBaseline = "middle";
   context.fillStyle = "#ffffff";

@@ -235,8 +235,16 @@ void accumulatePhotonLabelHit(
     if (abs(latitude) >= labelHalfLatitude) return;
 
     float longitude = atan(normal.z, normal.x);
+    float wrappedLongitude =
+        fract(longitude / TAU + 0.25);
+    bool cameraInsidePhotonSphere =
+        length(uCameraPosition) < PHOTON_RHO;
+    float readableLongitude =
+        cameraInsidePhotonSphere
+        ? wrappedLongitude
+        : 1.0 - wrappedLongitude;
     vec2 labelUv = vec2(
-        fract(longitude / TAU + 0.25),
+        readableLongitude,
         latitude / (2.0 * labelHalfLatitude) + 0.5
     );
     float cameraDistance =
@@ -263,8 +271,18 @@ void accumulatePhotonLabelHit(
             0.78,
             textureLod(uPhotonLabel, labelUv, labelLod).a
         );
+    float photonProximityFade =
+        smoothstep(
+            0.22,
+            0.95,
+            abs(length(uCameraPosition) - PHOTON_RHO)
+        );
     float alpha =
-        glyph * coverage * uPhotonLabelOpacity * 0.72;
+        glyph
+        * coverage
+        * uPhotonLabelOpacity
+        * photonProximityFade
+        * 0.72;
     if (alpha <= 0.001) return;
 
     if (!staticMotionHit) {

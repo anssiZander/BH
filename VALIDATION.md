@@ -198,6 +198,13 @@ implementation measurements in the preceding historical record.
 - Chrome 150's ANGLE OpenGL ES 3 compiler accepted and linked the exact
   `88,961`-byte assembled scene shader. The four wrapped phase gaps measure
   `12.756`, `13.439`, `10.278`, and `15.527` source units.
+- Exterior longitude sampling is mirrored for left-to-right reading, while
+  cameras inside `3M` use the opposite mapping. Opacity falls smoothly to zero
+  from `0.95M` to `0.22M` away from the photon shell, hiding both unreadable
+  close-range magnification and the orientation switch at the crossing. The
+  atlas font size was reduced from `96` to `78` pixels, shrinking the measured
+  label span from `1,052.2` to `853.4` of `2,048` atlas pixels. ANGLE accepted
+  and linked the revised `89,430`-byte assembled scene shader.
 
 - The supplied `1452 x 852`, 30 FPS recording contains 80 frames over
   `2.709313` seconds. Lensing is visibly disabled throughout. Registered

@@ -30,7 +30,8 @@ The shader files and local sky texture are loaded with `fetch()`, so opening
 - Station rotation: continuously adjusts the four bands from stopped to the
   original `0.015`-radian-per-second speed
 - Photon label: fades a translucent yellow Orbitron `PHOTON SPHERE` inscription
-  in or out on the equator of the lensed photon-sphere surface
+  in or out on the equator of the lensed photon-sphere surface; its reading
+  direction automatically reverses when the camera crosses inside
 
 The instrument panel controls RK2 integration quality, base ray step, flight
 speed, station rotation, field of view, grid brightness, shell count, exposure,
