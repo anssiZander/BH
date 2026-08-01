@@ -101,6 +101,58 @@ function createSkyTexture(gl, image) {
   return texture;
 }
 
+async function createPhotonLabelTexture(gl) {
+  try {
+    await document.fonts.load('700 96px "Orbitron"');
+  } catch {
+    // Canvas falls back cleanly if the local face cannot be decoded.
+  }
+
+  const labelCanvas = document.createElement("canvas");
+  labelCanvas.width = 2048;
+  labelCanvas.height = 256;
+  const context = labelCanvas.getContext("2d");
+  const label = "PHOTON SPHERE";
+  const spacing = 10;
+  context.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
+  context.font = '700 96px "Orbitron", sans-serif';
+  context.textAlign = "left";
+  context.textBaseline = "middle";
+  context.fillStyle = "#ffffff";
+
+  const glyphWidths = Array.from(label, (glyph) =>
+    context.measureText(glyph).width
+  );
+  const labelWidth =
+    glyphWidths.reduce((sum, width) => sum + width, 0)
+    + spacing * (label.length - 1);
+  let cursor = (labelCanvas.width - labelWidth) * 0.5;
+  for (let index = 0; index < label.length; index += 1) {
+    context.fillText(label[index], cursor, labelCanvas.height * 0.53);
+    cursor += glyphWidths[index] + spacing;
+  }
+
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA8,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    labelCanvas,
+  );
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return texture;
+}
+
 function createColorTarget(gl) {
   const texture = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -269,20 +321,40 @@ export class SchwarzschildRenderer {
     onProgress("Decoding the 4K spherical sky field…");
     const skyImage = await loadImage(SKY_TEXTURE_PATH);
     const skyTexture = createSkyTexture(gl, skyImage);
+    const photonLabelTexture = await createPhotonLabelTexture(gl);
 
-    return new SchwarzschildRenderer(canvas, gl, program, fxaaProgram, rcasProgram, skyTexture, {
-      width: skyImage.naturalWidth,
-      height: skyImage.naturalHeight,
-    });
+    return new SchwarzschildRenderer(
+      canvas,
+      gl,
+      program,
+      fxaaProgram,
+      rcasProgram,
+      skyTexture,
+      photonLabelTexture,
+      {
+        width: skyImage.naturalWidth,
+        height: skyImage.naturalHeight,
+      },
+    );
   }
 
-  constructor(canvas, gl, program, fxaaProgram, rcasProgram, skyTexture, textureSize) {
+  constructor(
+    canvas,
+    gl,
+    program,
+    fxaaProgram,
+    rcasProgram,
+    skyTexture,
+    photonLabelTexture,
+    textureSize,
+  ) {
     this.canvas = canvas;
     this.gl = gl;
     this.program = program;
     this.fxaaProgram = fxaaProgram;
     this.rcasProgram = rcasProgram;
     this.skyTexture = skyTexture;
+    this.photonLabelTexture = photonLabelTexture;
     this.textureSize = textureSize;
     this.renderScale = 0.86;
     this.maxPixels = 2_000_000;
@@ -339,6 +411,8 @@ export class SchwarzschildRenderer {
       "uExposure",
       "uSaturation",
       "uSky",
+      "uPhotonLabel",
+      "uPhotonLabelOpacity",
     ];
 
     for (const name of uniformNames) {
@@ -368,6 +442,7 @@ export class SchwarzschildRenderer {
     gl.bindVertexArray(this.vao);
     gl.useProgram(program);
     gl.uniform1i(this.uniforms.uSky, 0);
+    gl.uniform1i(this.uniforms.uPhotonLabel, 5);
     gl.useProgram(fxaaProgram);
     gl.uniform1i(this.fxaaUniforms.uCurrentFrame, 1);
     gl.uniform1i(this.fxaaUniforms.uHistoryFrame, 2);
@@ -490,6 +565,8 @@ export class SchwarzschildRenderer {
     gl.bindVertexArray(this.vao);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.skyTexture);
+    gl.activeTexture(gl.TEXTURE5);
+    gl.bindTexture(gl.TEXTURE_2D, this.photonLabelTexture);
 
     gl.uniform2f(u.uResolution, this.canvas.width, this.canvas.height);
     gl.uniform3fv(u.uCameraPosition, camera.position);
@@ -536,6 +613,7 @@ export class SchwarzschildRenderer {
     gl.uniform1i(u.uShellCount, settings.shellCount);
     gl.uniform1f(u.uExposure, settings.exposure);
     gl.uniform1f(u.uSaturation, settings.saturation);
+    gl.uniform1f(u.uPhotonLabelOpacity, settings.photonLabelOpacity);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 

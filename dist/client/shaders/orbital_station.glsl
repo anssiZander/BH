@@ -16,6 +16,12 @@
 
 const float STATION_SCALE = PHOTON_RHO / 8.0;
 const float STATION_BAND_HALF_ARC = 1.0;
+const float STATION_BAND_PHASES[4] = float[](
+    1.731,
+    14.487,
+    27.926,
+    38.204
+);
 
 const uint STATION_MAT_FLOOR = 1u;
 const uint STATION_MAT_WALL = 2u;
@@ -519,15 +525,11 @@ vec3 stationBandTransform(vec3 point) {
         abs(outerBandOffset) < abs(innerBandOffset);
     float nearestBandOffset =
         outerBand ? outerBandOffset : innerBandOffset;
-    // Offset the repeating longitudinal city cells independently for all four
-    // bands so their hull panels, rails, and greebles do not form aligned rows.
-    float bandPhase = 0.0;
-    if (latitude < 0.0) {
-        bandPhase += 0.173;
-    }
-    if (outerBand) {
-        bandPhase += 0.347;
-    }
+    // Stratify the four deterministic pseudo-random phases around the full
+    // 52-unit circumference. Each copy samples a distant city-cell sequence
+    // instead of merely nudging the same longitudinal pattern.
+    int bandIndex = (outerBand ? 2 : 0) + (latitude < 0.0 ? 1 : 0);
+    float bandPhase = STATION_BAND_PHASES[bandIndex];
     return vec3(
         26.0 * (longitude / PI) + bandPhase,
         sphereRadius * nearestBandOffset,

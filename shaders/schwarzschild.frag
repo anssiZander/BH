@@ -36,6 +36,8 @@ uniform int uShellCount;
 uniform float uExposure;
 uniform float uSaturation;
 uniform sampler2D uSky;
+uniform sampler2D uPhotonLabel;
+uniform float uPhotonLabelOpacity;
 
 const float PI = 3.14159265358979323846;
 const float TAU = 6.28318530717958647692;
@@ -216,6 +218,63 @@ void accumulateGridHit(
         * photonEmphasis;
     gridLight += (1.0 - gridOpacity) * alpha * emission;
     gridOpacity += (1.0 - gridOpacity) * alpha * 0.82;
+}
+
+void accumulatePhotonLabelHit(
+    vec3 crossing,
+    vec3 rayDirection,
+    float coverage,
+    inout vec3 gridLight,
+    inout float gridOpacity
+) {
+    if (uPhotonLabelOpacity <= 0.001) return;
+
+    vec3 normal = normalize(crossing);
+    float latitude = asin(clamp(normal.y, -1.0, 1.0));
+    const float labelHalfLatitude = 0.16;
+    if (abs(latitude) >= labelHalfLatitude) return;
+
+    float longitude = atan(normal.z, normal.x);
+    vec2 labelUv = vec2(
+        fract(longitude / TAU + 0.25),
+        latitude / (2.0 * labelHalfLatitude) + 0.5
+    );
+    float cameraDistance =
+        length(crossing - uCameraPosition);
+    float pixelWorld =
+        2.0
+        * cameraDistance
+        * tan(0.5 * uFovY)
+        / max(uResolution.y, 1.0);
+    float viewFacing =
+        max(
+            abs(dot(normal, normalize(-rayDirection))),
+            0.12
+        );
+    float texelFootprint =
+        pixelWorld
+        * 800.0
+        / (PHOTON_RHO * viewFacing);
+    float labelLod =
+        clamp(log2(max(texelFootprint, 1.0)), 0.0, 8.0);
+    float glyph =
+        smoothstep(
+            0.04,
+            0.78,
+            textureLod(uPhotonLabel, labelUv, labelLod).a
+        );
+    float alpha =
+        glyph * coverage * uPhotonLabelOpacity * 0.72;
+    if (alpha <= 0.001) return;
+
+    if (!staticMotionHit) {
+        staticMotionHit = true;
+        staticMotionPoint = crossing;
+        staticMotionDepth = cameraDistance;
+    }
+    vec3 emission = vec3(1.0, 0.70, 0.055) * 1.75;
+    gridLight += (1.0 - gridOpacity) * alpha * emission;
+    gridOpacity += (1.0 - gridOpacity) * alpha * 0.58;
 }
 
 float surfaceGrain(vec3 point, int shell) {
@@ -1081,14 +1140,17 @@ void accumulateShellCrossings(
     float structureT
 ) {
     bool gridsActive = uGridVisible && uGridBrightness > 0.0;
-    if (!gridsActive && !uSpheresVisible) return;
+    bool labelActive = uPhotonLabelOpacity > 0.001;
+    if (!gridsActive && !uSpheresVisible && !labelActive) return;
 
     vec3 segment = newPosition - oldPosition;
     float segmentLengthSquared = dot(segment, segment);
     if (segmentLengthSquared < 1e-12) return;
 
     for (int shell = 0; shell < SHELL_COUNT; ++shell) {
-        if (shell >= uShellCount) break;
+        bool shellEnabled = shell < uShellCount;
+        bool photonLabelShell = labelActive && shell == 2;
+        if (!shellEnabled && !photonLabelShell) continue;
         float shellRadius = SHELL_RADII[shell];
         float firstRoot;
         float secondRoot;
@@ -1106,7 +1168,8 @@ void accumulateShellCrossings(
                 vec3 crossing =
                     oldPosition + segment * clamp(firstRoot, 0.0, 1.0);
                 if (
-                    gridsActive
+                    shellEnabled
+                    && gridsActive
                     && surfaceOpacity < 0.999
                     && firstRoot < structureT
                 ) {
@@ -1118,14 +1181,29 @@ void accumulateShellCrossings(
                         gridOpacity
                     );
                 }
-                accumulateSphereHit(
-                    crossing,
-                    rayDirection,
-                    shell,
-                    1.0,
-                    surfaceLight,
-                    surfaceOpacity
-                );
+                if (
+                    photonLabelShell
+                    && surfaceOpacity < 0.999
+                    && firstRoot < structureT
+                ) {
+                    accumulatePhotonLabelHit(
+                        crossing,
+                        rayDirection,
+                        1.0,
+                        gridLight,
+                        gridOpacity
+                    );
+                }
+                if (shellEnabled) {
+                    accumulateSphereHit(
+                        crossing,
+                        rayDirection,
+                        shell,
+                        1.0,
+                        surfaceLight,
+                        surfaceOpacity
+                    );
+                }
             }
             if (
                 secondRoot > 1e-5
@@ -1135,7 +1213,8 @@ void accumulateShellCrossings(
                 vec3 crossing =
                     oldPosition + segment * clamp(secondRoot, 0.0, 1.0);
                 if (
-                    gridsActive
+                    shellEnabled
+                    && gridsActive
                     && surfaceOpacity < 0.999
                     && secondRoot < structureT
                 ) {
@@ -1147,14 +1226,29 @@ void accumulateShellCrossings(
                         gridOpacity
                     );
                 }
-                accumulateSphereHit(
-                    crossing,
-                    rayDirection,
-                    shell,
-                    1.0,
-                    surfaceLight,
-                    surfaceOpacity
-                );
+                if (
+                    photonLabelShell
+                    && surfaceOpacity < 0.999
+                    && secondRoot < structureT
+                ) {
+                    accumulatePhotonLabelHit(
+                        crossing,
+                        rayDirection,
+                        1.0,
+                        gridLight,
+                        gridOpacity
+                    );
+                }
+                if (shellEnabled) {
+                    accumulateSphereHit(
+                        crossing,
+                        rayDirection,
+                        shell,
+                        1.0,
+                        surfaceLight,
+                        surfaceOpacity
+                    );
+                }
             }
             continue;
         }
@@ -1183,7 +1277,8 @@ void accumulateShellCrossings(
             1.0 - smoothstep(0.0, pixelWorld * 1.25, missDistance);
         if (edgeCoverage <= 0.001) continue;
         if (
-            gridsActive
+            shellEnabled
+            && gridsActive
             && surfaceOpacity < 0.999
             && closestT < structureT
         ) {
@@ -1195,14 +1290,29 @@ void accumulateShellCrossings(
                 gridOpacity
             );
         }
-        accumulateSphereHit(
-            closestPoint,
-            rayDirection,
-            shell,
-            edgeCoverage,
-            surfaceLight,
-            surfaceOpacity
-        );
+        if (
+            photonLabelShell
+            && surfaceOpacity < 0.999
+            && closestT < structureT
+        ) {
+            accumulatePhotonLabelHit(
+                closestPoint,
+                rayDirection,
+                edgeCoverage,
+                gridLight,
+                gridOpacity
+            );
+        }
+        if (shellEnabled) {
+            accumulateSphereHit(
+                closestPoint,
+                rayDirection,
+                shell,
+                edgeCoverage,
+                surfaceLight,
+                surfaceOpacity
+            );
+        }
     }
 }
 
@@ -1246,10 +1356,13 @@ void traceFlatScene(
 
     bool gridsActive = uGridVisible && uGridBrightness > 0.0;
     bool spheresActive = uSpheresVisible;
-    if (gridsActive || spheresActive) {
+    bool labelActive = uPhotonLabelOpacity > 0.001;
+    if (gridsActive || spheresActive || labelActive) {
         // Outside-to-inside near hits are the correct front-to-back order.
         for (int shell = SHELL_COUNT - 1; shell >= 0; --shell) {
-            if (shell >= uShellCount) continue;
+            bool shellEnabled = shell < uShellCount;
+            bool photonLabelShell = labelActive && shell == 2;
+            if (!shellEnabled && !photonLabelShell) continue;
             float radius = SHELL_RADII[shell];
             float discriminant =
                 originProjection * originProjection - (dot(origin, origin) - radius * radius);
@@ -1261,7 +1374,8 @@ void traceFlatScene(
             if (nearDistance > 1e-5 && nearDistance < horizonDistance) {
                 vec3 crossing = origin + tangent * nearDistance;
                 if (
-                    gridsActive
+                    shellEnabled
+                    && gridsActive
                     && surfaceOpacity < 0.999
                     && nearDistance < structureDistance
                 ) {
@@ -1273,7 +1387,20 @@ void traceFlatScene(
                         gridOpacity
                     );
                 }
-                if (spheresActive) {
+                if (
+                    photonLabelShell
+                    && surfaceOpacity < 0.999
+                    && nearDistance < structureDistance
+                ) {
+                    accumulatePhotonLabelHit(
+                        crossing,
+                        tangent,
+                        1.0,
+                        gridLight,
+                        gridOpacity
+                    );
+                }
+                if (shellEnabled && spheresActive) {
                     accumulateSphereHit(
                         crossing,
                         tangent,
@@ -1288,7 +1415,9 @@ void traceFlatScene(
 
         // Inside-to-outside far hits continue that front-to-back ordering.
         for (int shell = 0; shell < SHELL_COUNT; ++shell) {
-            if (shell >= uShellCount) break;
+            bool shellEnabled = shell < uShellCount;
+            bool photonLabelShell = labelActive && shell == 2;
+            if (!shellEnabled && !photonLabelShell) continue;
             float radius = SHELL_RADII[shell];
             float discriminant =
                 originProjection * originProjection - (dot(origin, origin) - radius * radius);
@@ -1298,7 +1427,8 @@ void traceFlatScene(
             if (farDistance > 1e-5 && farDistance < horizonDistance) {
                 vec3 crossing = origin + tangent * farDistance;
                 if (
-                    gridsActive
+                    shellEnabled
+                    && gridsActive
                     && surfaceOpacity < 0.999
                     && farDistance < structureDistance
                 ) {
@@ -1310,7 +1440,20 @@ void traceFlatScene(
                         gridOpacity
                     );
                 }
-                if (spheresActive) {
+                if (
+                    photonLabelShell
+                    && surfaceOpacity < 0.999
+                    && farDistance < structureDistance
+                ) {
+                    accumulatePhotonLabelHit(
+                        crossing,
+                        tangent,
+                        1.0,
+                        gridLight,
+                        gridOpacity
+                    );
+                }
+                if (shellEnabled && spheresActive) {
                     accumulateSphereHit(
                         crossing,
                         tangent,

@@ -185,14 +185,19 @@ implementation measurements in the preceding historical record.
 
 ## Photon-sphere indicator and band phases (1 August 2026)
 
-- A self-hosted Orbitron face renders the translucent yellow `PHOTON SPHERE`
-  indicator at the projected black-hole center. Its control uses an `850 ms`
-  eased opacity, blur, and scale transition, and the label also fades out when
-  the center leaves the camera view.
-- The four station copies use distinct longitudinal procedural offsets:
-  `0.000`, `0.173`, `0.347`, and `0.520`. Geometry and material evaluation use
+- A self-hosted Orbitron face is rasterized once into a mipmapped GPU label
+  atlas. The translucent yellow `PHOTON SPHERE` inscription is sampled using
+  longitude and latitude at the `3M` photon-shell crossing, so it bends around
+  the sphere and follows both flat and lensed ray paths. Its control uses a
+  frame-rate-independent exponential fade.
+- The four station copies use widely stratified, deterministic pseudo-random
+  longitudinal offsets: `1.731`, `14.487`, `27.926`, and `38.204` across the
+  source ring's `52`-unit circumference. Geometry and material evaluation use
   the same transformed coordinates, preventing their panels, rails, and
   greebles from lining up between bands.
+- Chrome 150's ANGLE OpenGL ES 3 compiler accepted and linked the exact
+  `88,961`-byte assembled scene shader. The four wrapped phase gaps measure
+  `12.756`, `13.439`, `10.278`, and `15.527` source units.
 
 - The supplied `1452 x 852`, 30 FPS recording contains 80 frames over
   `2.709313` seconds. Lensing is visibly disabled throughout. Registered

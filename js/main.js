@@ -37,7 +37,6 @@ const radiusMarker = document.querySelector("#radiusMarker");
 const pointerHint = document.querySelector("#pointerHint");
 const statusPill = document.querySelector("#statusPill");
 const statusText = document.querySelector("#statusText");
-const photonSphereIndicator = document.querySelector("#photonSphereIndicator");
 const controlsPanel = document.querySelector(".controls-panel");
 const radialLandmarks = document.querySelectorAll("[data-areal-radius]");
 
@@ -51,6 +50,7 @@ const settings = {
   exposure: 1.1,
   saturation: 1.18,
   stationRotationSpeed: 0.015,
+  photonLabelOpacity: 1,
   lensing: true,
   gridVisible: true,
   spheresVisible: false,
@@ -66,6 +66,7 @@ let lastTelemetryTime = 0;
 let stepCapDetected = false;
 let lastProbeTime = 0;
 let uiHidden = false;
+let photonLabelTarget = 1;
 
 function bindRange(inputId, outputId, settingKey, format, onInput) {
   const input = document.querySelector(`#${inputId}`);
@@ -150,10 +151,8 @@ function bindControls() {
 
   const photonIndicatorInput = document.querySelector("#photonIndicatorInput");
   const updatePhotonIndicatorVisibility = () => {
-    document.body.classList.toggle(
-      "photon-indicator-enabled",
-      photonIndicatorInput.checked,
-    );
+    photonLabelTarget = photonIndicatorInput.checked ? 1 : 0;
+    renderer?.invalidateHistory();
   };
   photonIndicatorInput.addEventListener(
     "change",
@@ -237,46 +236,6 @@ function updateTelemetry(now) {
   } else {
     statusText.textContent = "SCHWARZSCHILD FIELD · STABLE";
   }
-}
-
-function updatePhotonIndicatorPosition() {
-  if (!camera) return;
-  const relativeX = -camera.position[0];
-  const relativeY = -camera.position[1];
-  const relativeZ = -camera.position[2];
-  const forwardDistance =
-    relativeX * camera.forward[0]
-    + relativeY * camera.forward[1]
-    + relativeZ * camera.forward[2];
-  if (forwardDistance <= 1e-5) {
-    photonSphereIndicator.dataset.inView = "false";
-    return;
-  }
-
-  const aspect = canvas.width / Math.max(canvas.height, 1);
-  const focalScale = Math.tan((settings.fov * Math.PI) / 360);
-  const screenX =
-    (
-      relativeX * camera.right[0]
-      + relativeY * camera.right[1]
-      + relativeZ * camera.right[2]
-    ) / Math.max(forwardDistance * aspect * focalScale, 1e-6);
-  const screenY =
-    (
-      relativeX * camera.up[0]
-      + relativeY * camera.up[1]
-      + relativeZ * camera.up[2]
-    ) / Math.max(forwardDistance * focalScale, 1e-6);
-  const inView = Math.abs(screenX) <= 1.12 && Math.abs(screenY) <= 1.08;
-  photonSphereIndicator.dataset.inView = String(inView);
-  photonSphereIndicator.style.setProperty(
-    "--indicator-x",
-    `${(screenX * 0.5 + 0.5) * 100}%`,
-  );
-  photonSphereIndicator.style.setProperty(
-    "--indicator-y",
-    `${(0.5 - screenY * 0.5) * 100}%`,
-  );
 }
 
 function opticalAcceleration(position, direction) {
@@ -686,7 +645,12 @@ function animate(now) {
   const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
   lastFrameTime = now;
   camera.update(deltaSeconds);
-  updatePhotonIndicatorPosition();
+  const labelBlend = 1 - Math.exp(-4.5 * deltaSeconds);
+  settings.photonLabelOpacity +=
+    (photonLabelTarget - settings.photonLabelOpacity) * labelBlend;
+  if (Math.abs(photonLabelTarget - settings.photonLabelOpacity) < 0.001) {
+    settings.photonLabelOpacity = photonLabelTarget;
+  }
   renderer.render(camera, settings, now / 1000);
 
   const instantaneousFps = 1 / Math.max(deltaSeconds, 1 / 240);
