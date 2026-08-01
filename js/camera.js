@@ -4,9 +4,9 @@ const RESET_YAW = Math.PI;
 const RESET_PITCH = -0.0996687;
 const HORIZON_GUARD = 0.535;
 const MAX_DELTA_SECONDS = 0.05;
-const LOOK_RESPONSE = 14;
-const MOVE_ACCELERATION_RESPONSE = 7;
-const MOVE_DECELERATION_RESPONSE = 14;
+const LOOK_RESPONSE = 8.5;
+const MOVE_ACCELERATION_RESPONSE = 4.5;
+const MOVE_DECELERATION_RESPONSE = 7;
 
 function normalize(out, x, y, z) {
   const length = Math.hypot(x, y, z) || 1;
@@ -48,6 +48,9 @@ export class FirstPersonCamera {
     this.velocity = new Float32Array(3);
     this.targetVelocity = new Float32Array(3);
     this.displacement = new Float32Array(3);
+    this.travelInward = new Float32Array(3);
+    this.travelRight = new Float32Array(3);
+    this.travelUp = new Float32Array(3);
     this.speed = 1.4;
     this.sensitivity = 0.00175;
     this.keys = new Set();
@@ -149,6 +152,49 @@ export class FirstPersonCamera {
     normalize(this.up, this.up[0], this.up[1], this.up[2]);
   }
 
+  _updateTravelBasis() {
+    normalize(
+      this.travelInward,
+      -this.position[0],
+      -this.position[1],
+      -this.position[2],
+    );
+    const nearlyPolar = Math.abs(this.travelInward[1]) > 0.95;
+    const referenceX = 0;
+    const referenceY = nearlyPolar ? 0 : 1;
+    const referenceZ = nearlyPolar ? 1 : 0;
+    cross(
+      this.travelRight,
+      this.travelInward[0],
+      this.travelInward[1],
+      this.travelInward[2],
+      referenceX,
+      referenceY,
+      referenceZ,
+    );
+    normalize(
+      this.travelRight,
+      this.travelRight[0],
+      this.travelRight[1],
+      this.travelRight[2],
+    );
+    cross(
+      this.travelUp,
+      this.travelRight[0],
+      this.travelRight[1],
+      this.travelRight[2],
+      this.travelInward[0],
+      this.travelInward[1],
+      this.travelInward[2],
+    );
+    normalize(
+      this.travelUp,
+      this.travelUp[0],
+      this.travelUp[1],
+      this.travelUp[2],
+    );
+  }
+
   update(deltaSeconds) {
     const dt = Math.max(
       0,
@@ -189,12 +235,25 @@ export class FirstPersonCamera {
       movementLength > 0
         ? this.speed * boost * horizonSlowdown
         : 0;
+    this._updateTravelBasis();
     this.targetVelocity[0] =
-      (this.right[0] * mx + WORLD_UP[0] * my + this.forward[0] * mz) * targetSpeed;
+      (
+        this.travelRight[0] * mx
+        + this.travelUp[0] * my
+        + this.travelInward[0] * mz
+      ) * targetSpeed;
     this.targetVelocity[1] =
-      (this.right[1] * mx + WORLD_UP[1] * my + this.forward[1] * mz) * targetSpeed;
+      (
+        this.travelRight[1] * mx
+        + this.travelUp[1] * my
+        + this.travelInward[1] * mz
+      ) * targetSpeed;
     this.targetVelocity[2] =
-      (this.right[2] * mx + WORLD_UP[2] * my + this.forward[2] * mz) * targetSpeed;
+      (
+        this.travelRight[2] * mx
+        + this.travelUp[2] * my
+        + this.travelInward[2] * mz
+      ) * targetSpeed;
     const response =
       movementLength > 0
         ? MOVE_ACCELERATION_RESPONSE

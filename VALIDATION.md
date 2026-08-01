@@ -294,3 +294,15 @@ impact-parameter-aware fallback instead of being allowed to stall the GPU.
 - Recording uses one continuous `MediaRecorder` segment for reliable MP4
   finalization. Stopping releases the capture track, downloads a timestamped
   file, reports its final size, and leaves the renderer running throughout.
+
+## Black-hole-relative locomotion (1 August 2026)
+
+- Locomotion now uses an orthonormal basis derived only from camera position:
+  inward radial motion for W/S, azimuthal motion for A/D, and polar tangent
+  motion for Space/C. Mouse yaw and pitch do not enter the travel basis.
+- Mouse-look response was reduced from `14` to `8.5`. Movement acceleration
+  response was reduced from `7` to `4.5`, and deceleration response from `14`
+  to `7`, lengthening all three frame-rate-independent easing curves.
+- Identical W input at two unrelated yaw angles produced zero target-velocity
+  difference. W's normalized inward alignment measured `1.000000025`, while
+  D's radial dot product was exactly zero in the deterministic camera check.

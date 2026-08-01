@@ -20,9 +20,9 @@ The shader files and local sky texture are loaded with `fetch()`, so opening
 
 - Click the scene: capture the pointer for mouse look
 - Mouse: yaw and pitch
-- W / S: forward and backward
-- A / D: strafe
-- Space / C (or E / Q): rise and fall
+- W / S: move radially toward or away from the black hole
+- A / D: move azimuthally left or right around the black hole
+- Space / C (or E / Q): move toward either pole
 - Shift: flight-speed boost
 - R: reset the camera
 - H: hide or restore the interface
@@ -141,10 +141,11 @@ screen position. History is cleared after long frame stalls as well as on
 resize, quality or display-setting changes, camera reset, and tab visibility
 changes.
 
-Keyboard movement eases gradually toward and away from its target velocity,
-while mouse look uses a softer target-orientation response. Both use
-frame-rate-independent exponential responses; reset, focus loss, and
-pointer-lock transitions cancel residual motion safely.
+Keyboard movement uses a black-hole-centered radial, azimuthal, and polar
+basis that is independent of the viewing direction. It eases gradually toward
+and away from its target velocity, while mouse look uses a still softer target-
+orientation response. Both use frame-rate-independent exponential responses;
+reset, focus loss, and pointer-lock transitions cancel residual motion safely.
 
 ## Quality and performance
 
