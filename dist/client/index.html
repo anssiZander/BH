@@ -5,35 +5,36 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="A real-time, numerically integrated Schwarzschild black-hole optics laboratory."
+      content="A real-time Schwarzschild optics laboratory with three nested double-band Dyson assemblies."
     />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Schwarzschild Optical Field" />
     <meta
       property="og:description"
-      content="Fly through numerically integrated light paths and four curved orbital-station bands at the Schwarzschild photon sphere."
+      content="Fly through numerically integrated light paths and three nested double-band Dyson assemblies around a Schwarzschild black hole."
     />
     <meta
       property="og:image"
-      content="https://schwarzschild-optical-field.anssmirk.chatgpt.site/assets/social-preview-four-bands.png"
+      content="https://schwarzschild-optical-field.anssmirk.chatgpt.site/assets/social-preview-coplanar-doublets.png"
     />
     <meta property="og:image:width" content="1730" />
     <meta property="og:image:height" content="909" />
     <meta
       property="og:image:alt"
-      content="Four curved greebled orbital-station bands with equal gaps framing a clear equatorial view of a Schwarzschild black hole"
+      content="Three nested greebled Dyson doublets sharing one equatorial plane around a Schwarzschild black hole"
     />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Schwarzschild Optical Field" />
     <meta
       name="twitter:description"
-      content="A real-time WebGL2 laboratory for Schwarzschild lensing and four curved photon-sphere station bands."
+      content="A real-time WebGL2 laboratory for Schwarzschild lensing and three independently oriented Dyson doublets."
     />
     <meta
       name="twitter:image"
-      content="https://schwarzschild-optical-field.anssmirk.chatgpt.site/assets/social-preview-four-bands.png"
+      content="https://schwarzschild-optical-field.anssmirk.chatgpt.site/assets/social-preview-coplanar-doublets.png"
     />
     <meta name="theme-color" content="#03040b" />
+    <link rel="icon" href="data:," />
     <title>Schwarzschild Optical Field</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -86,8 +87,8 @@
               <span>Quality</span>
               <select id="qualitySelect">
                 <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high" selected>High</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
                 <option value="ultra">Ultra</option>
               </select>
             </label>
@@ -113,11 +114,6 @@
             </label>
 
             <label class="range-control">
-              <span>Grid light <output id="gridOutput">0.80</output></span>
-              <input id="gridInput" type="range" min="0" max="2.5" step="0.05" value="0.80" />
-            </label>
-
-            <label class="range-control">
               <span>Visible shells <output id="shellOutput">8</output></span>
               <input id="shellInput" type="range" min="1" max="8" step="1" value="8" />
             </label>
@@ -138,11 +134,6 @@
               <input id="lensingInput" type="checkbox" checked />
               <span class="switch-track"><span></span></span>
               <span>Lensing</span>
-            </label>
-            <label class="switch-control">
-              <input id="gridVisibleInput" type="checkbox" checked />
-              <span class="switch-track"><span></span></span>
-              <span>Grids</span>
             </label>
             <label class="switch-control">
               <input id="spheresVisibleInput" type="checkbox" />
@@ -208,16 +199,22 @@
           <span></span><span></span><span></span>
         </div>
         <p>CALIBRATING NULL GEODESICS</p>
-        <small id="loadingDetail">Fetching shaders and 4K sky field…</small>
+        <small id="loadingDetail">Fetching shaders and spherical sky field…</small>
       </div>
 
       <div id="fatalError" class="fatal-error glass-panel" hidden>
         <span class="eyebrow">RENDERER OFFLINE</span>
         <h2>WebGL2 could not start</h2>
         <p id="fatalMessage"></p>
+        <button id="retryStartupButton" class="text-button" type="button">
+          Retry startup
+        </button>
       </div>
     </main>
 
-    <script type="module" src="js/main.js"></script>
+    <script
+      type="module"
+      src="js/main.js?v=20260801-context-v4"
+    ></script>
   </body>
 </html>

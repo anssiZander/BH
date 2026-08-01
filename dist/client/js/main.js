@@ -2,23 +2,30 @@ import {
   FirstPersonCamera,
   arealToIsotropic,
   isotropicToAreal,
-} from "./camera.js";
-import { SchwarzschildRenderer } from "./webgl.js";
+} from "./camera.js?v=20260801-context-v4";
+import { SchwarzschildRenderer } from "./webgl.js?v=20260801-context-v4";
 
 const QUALITY_PROFILES = {
   low: { maxSteps: 256, scale: 0.52, maxPixels: 750_000 },
   medium: { maxSteps: 320, scale: 0.78, maxPixels: 1_500_000 },
-  high: { maxSteps: 416, scale: 1.0, maxPixels: 2_600_000 },
-  ultra: { maxSteps: 896, scale: 1.15, maxPixels: 4_200_000 },
+  high: { maxSteps: 416, scale: 1.0, maxPixels: 2_000_000 },
+  ultra: { maxSteps: 896, scale: 1.15, maxPixels: 3_000_000 },
 };
 
 const CAPTURE_RHO = 0.515;
 const PHOTON_RHO = (2 + Math.sqrt(3)) / 2;
 const RADIAL_TRACK_MIN_AREAL = 2;
 const RADIAL_TRACK_MAX_AREAL = 22;
-const STATION_INNER_BAND_LATITUDE = 0.1875;
-const STATION_OUTER_BAND_LATITUDE = 0.5625;
+const STATION_DOUBLE_BAND_LATITUDE = 0.1875;
 const STATION_ENVELOPE_HALF_ANGLE = 0.15;
+const STATION_RADIAL_ENVELOPE = 0.11;
+const STATION_ASSEMBLY_RADII = [
+  PHOTON_RHO,
+  PHOTON_RHO + 0.3,
+  PHOTON_RHO - 0.3,
+];
+const CONTEXT_RECOVERY_KEY = "schwarzschild-context-recovery";
+const STABLE_FRAMES_BEFORE_RECOVERY_CLEAR = 120;
 const ESCAPE_RHO = 36;
 const SHELL_RADII = [
   0.93166248, 1.30901699, 1.8660254, 2.39564392,
@@ -30,6 +37,7 @@ const loadingScreen = document.querySelector("#loadingScreen");
 const loadingDetail = document.querySelector("#loadingDetail");
 const fatalError = document.querySelector("#fatalError");
 const fatalMessage = document.querySelector("#fatalMessage");
+const retryStartupButton = document.querySelector("#retryStartupButton");
 const radiusValue = document.querySelector("#radiusValue");
 const fpsValue = document.querySelector("#fpsValue");
 const stepValue = document.querySelector("#stepValue");
@@ -43,19 +51,42 @@ const recordStatus = document.querySelector("#recordStatus");
 const controlsPanel = document.querySelector(".controls-panel");
 const radialLandmarks = document.querySelectorAll("[data-areal-radius]");
 
+function readContextRecoveryCount() {
+  try {
+    return Math.max(0, Number(sessionStorage.getItem(CONTEXT_RECOVERY_KEY)) || 0);
+  } catch {
+    return 0;
+  }
+}
+
+function writeContextRecoveryCount(count) {
+  try {
+    sessionStorage.setItem(CONTEXT_RECOVERY_KEY, String(count));
+  } catch {
+    // Recovery remains available for this page even without session storage.
+  }
+}
+
+function clearContextRecoveryCount() {
+  try {
+    sessionStorage.removeItem(CONTEXT_RECOVERY_KEY);
+  } catch {
+    // Storage may be unavailable in hardened private browsing modes.
+  }
+}
+
+const initialQuality = readContextRecoveryCount() > 0 ? "low" : "medium";
 const settings = {
-  quality: "high",
-  maxSteps: QUALITY_PROFILES.high.maxSteps,
+  quality: initialQuality,
+  maxSteps: QUALITY_PROFILES[initialQuality].maxSteps,
   baseStep: 0.09,
   fov: 68,
-  gridBrightness: 0.8,
   shellCount: 8,
   exposure: 1.1,
   saturation: 1.18,
   stationRotationSpeed: 0.015,
   photonLabelOpacity: 1,
   lensing: true,
-  gridVisible: true,
   spheresVisible: false,
   skyVisible: true,
   ringsVisible: true,
@@ -70,6 +101,10 @@ let stepCapDetected = false;
 let lastProbeTime = 0;
 let uiHidden = false;
 let photonLabelTarget = 1;
+let animationFrameId = 0;
+let rendererGeneration = 0;
+let applicationState = "starting";
+let stableFrameCount = 0;
 
 const RECORDING_FPS = 60;
 const RECORDING_VIDEO_BITS_PER_SECOND = 16_000_000;
@@ -99,6 +134,14 @@ function bindRange(inputId, outputId, settingKey, format, onInput) {
   update();
 }
 
+function applyQualityProfile(quality) {
+  settings.quality = quality;
+  const profile = QUALITY_PROFILES[quality];
+  settings.maxSteps = profile.maxSteps;
+  renderer?.setQuality(profile);
+  stepValue.textContent = `${settings.maxSteps} RK2`;
+}
+
 function bindControls() {
   for (const landmark of radialLandmarks) {
     const radius = Number(landmark.dataset.arealRadius);
@@ -106,12 +149,9 @@ function bindControls() {
   }
 
   const qualitySelect = document.querySelector("#qualitySelect");
+  qualitySelect.value = settings.quality;
   const updateQuality = () => {
-    settings.quality = qualitySelect.value;
-    const profile = QUALITY_PROFILES[settings.quality];
-    settings.maxSteps = profile.maxSteps;
-    renderer?.setQuality(profile);
-    stepValue.textContent = `${settings.maxSteps} RK2`;
+    applyQualityProfile(qualitySelect.value);
   };
   qualitySelect.addEventListener("change", updateQuality);
   updateQuality();
@@ -127,7 +167,6 @@ function bindControls() {
     (value) => `${Math.round((value / 0.015) * 100)}%`,
   );
   bindRange("fovInput", "fovOutput", "fov", (value) => `${Math.round(value)}°`);
-  bindRange("gridInput", "gridOutput", "gridBrightness", (value) => value.toFixed(2));
   bindRange("shellInput", "shellOutput", "shellCount", (value) => `${Math.round(value)}`);
   bindRange("exposureInput", "exposureOutput", "exposure", (value) => value.toFixed(2));
   bindRange("saturationInput", "saturationOutput", "saturation", (value) => value.toFixed(2));
@@ -138,13 +177,6 @@ function bindControls() {
   };
   lensingInput.addEventListener("change", updateLensing);
   updateLensing();
-
-  const gridVisibleInput = document.querySelector("#gridVisibleInput");
-  const updateGridVisibility = () => {
-    settings.gridVisible = gridVisibleInput.checked;
-  };
-  gridVisibleInput.addEventListener("change", updateGridVisibility);
-  updateGridVisibility();
 
   const spheresVisibleInput = document.querySelector("#spheresVisibleInput");
   const updateSphereVisibility = () => {
@@ -451,7 +483,7 @@ function smoothstep(edge0, edge1, value) {
   return t * t * (3 - 2 * t);
 }
 
-function stationBandEnvelope(position) {
+function stationAssemblyBandEnvelope(position, assemblyIndex) {
   const stationRadius = Math.hypot(...position);
   const stationLatitude = Math.asin(
     Math.max(
@@ -459,25 +491,27 @@ function stationBandEnvelope(position) {
       Math.min(1, Math.abs(position[1]) / Math.max(stationRadius, 1e-8)),
     ),
   );
-  const innerAngularEnvelope = stationRadius * Math.sin(
-    Math.abs(stationLatitude - STATION_INNER_BAND_LATITUDE)
+  const angularEnvelope = stationRadius * Math.sin(
+    Math.abs(stationLatitude - STATION_DOUBLE_BAND_LATITUDE)
       - STATION_ENVELOPE_HALF_ANGLE,
   );
-  const outerAngularEnvelope = stationRadius * Math.sin(
-    Math.abs(stationLatitude - STATION_OUTER_BAND_LATITUDE)
-      - STATION_ENVELOPE_HALF_ANGLE,
-  );
-  const radialEnvelope = Math.abs(stationRadius - PHOTON_RHO) - 0.11;
-  return Math.max(
-    radialEnvelope,
-    Math.min(innerAngularEnvelope, outerAngularEnvelope),
+  const radialEnvelope =
+    Math.abs(stationRadius - STATION_ASSEMBLY_RADII[assemblyIndex])
+    - STATION_RADIAL_ENVELOPE;
+  return Math.max(radialEnvelope, angularEnvelope);
+}
+
+function stationBandEnvelope(position) {
+  return Math.min(
+    ...STATION_ASSEMBLY_RADII.map((_, assemblyIndex) =>
+      stationAssemblyBandEnvelope(position, assemblyIndex),
+    ),
   );
 }
 
 function probeStepSize(
   position,
   baseStep,
-  gridVisible,
   spheresVisible,
   ringsVisible,
   shellCount,
@@ -487,7 +521,7 @@ function probeStepSize(
   const photonBlend = smoothstep(0, 0.28, Math.abs(rho - PHOTON_RHO));
   rayStep = Math.min(rayStep, 0.016 + (rayStep - 0.016) * photonBlend);
 
-  if ((gridVisible || spheresVisible) && rho > 0.64 && rho < 7.3) {
+  if (spheresVisible && rho > 0.64 && rho < 7.3) {
     for (let shell = 0; shell < Math.min(shellCount, SHELL_RADII.length); shell += 1) {
       const shellBlend = smoothstep(0, 0.28, Math.abs(rho - SHELL_RADII[shell]));
       rayStep = Math.min(rayStep, 0.075 + (rayStep - 0.075) * shellBlend);
@@ -531,7 +565,6 @@ function traceProbe(
     maxSteps,
     baseStep,
     lensing = true,
-    gridVisible = true,
     spheresVisible = false,
     ringsVisible = false,
     shellCount = SHELL_RADII.length,
@@ -582,7 +615,6 @@ function traceProbe(
     let step = probeStepSize(
       position,
       baseStep,
-      gridVisible,
       spheresVisible,
       ringsVisible,
       shellCount,
@@ -725,7 +757,6 @@ function probeCriticalRays(now) {
         maxSteps: settings.maxSteps,
         baseStep: settings.baseStep,
         lensing: true,
-        gridVisible: settings.gridVisible,
         spheresVisible: settings.spheresVisible,
         ringsVisible: settings.ringsVisible,
         shellCount: settings.shellCount,
@@ -740,7 +771,6 @@ function runPhysicsSelfCheck() {
     maxSteps: QUALITY_PROFILES.high.maxSteps,
     baseStep: 0.09,
     lensing: true,
-    gridVisible: true,
     spheresVisible: false,
     ringsVisible: false,
     shellCount: SHELL_RADII.length,
@@ -756,7 +786,6 @@ function runPhysicsSelfCheck() {
   const longProbeOptions = {
     ...probeOptions,
     maxSteps: QUALITY_PROFILES.ultra.maxSteps,
-    gridVisible: false,
   };
   const localOpticalRadius = opticalIndex(14) * 14;
   const directionForImpact = (impact) => {
@@ -827,52 +856,161 @@ function runPhysicsSelfCheck() {
   };
 }
 
-function animate(now) {
-  const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
-  lastFrameTime = now;
-  camera.update(deltaSeconds);
-  const labelBlend = 1 - Math.exp(-4.5 * deltaSeconds);
-  settings.photonLabelOpacity +=
-    (photonLabelTarget - settings.photonLabelOpacity) * labelBlend;
-  if (Math.abs(photonLabelTarget - settings.photonLabelOpacity) < 0.001) {
-    settings.photonLabelOpacity = photonLabelTarget;
+function stopAnimation() {
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = 0;
   }
-  renderer.render(camera, settings, now / 1000);
-
-  const instantaneousFps = 1 / Math.max(deltaSeconds, 1 / 240);
-  smoothedFps += (instantaneousFps - smoothedFps) * 0.035;
-  probeCriticalRays(now);
-  updateTelemetry(now);
-  updateRecordingStatus(now);
-  requestAnimationFrame(animate);
 }
 
-async function start() {
-  bindControls();
+function showLoadingState(message) {
+  fatalError.hidden = true;
+  loadingDetail.textContent = message;
+  loadingScreen.classList.remove("loaded");
+}
+
+function failRuntime(error) {
+  applicationState = "failed";
+  stopAnimation();
+  loadingScreen.classList.add("loaded");
+  fatalMessage.textContent = error instanceof Error
+    ? error.message
+    : String(error);
+  fatalError.hidden = false;
+  statusText.textContent = "RENDERER OFFLINE";
+}
+
+function handleContextLost(event) {
+  event.preventDefault();
+  rendererGeneration += 1;
+  applicationState = "context-lost";
+  stopAnimation();
+  renderer?.invalidateHistory();
+  renderer = undefined;
+  writeContextRecoveryCount(
+    Math.min(2, readContextRecoveryCount() + 1),
+  );
+  showLoadingState("Graphics context lost · restoring at safe quality…");
+  statusText.textContent = "GRAPHICS RESET · RECOVERING";
+}
+
+async function handleContextRestored() {
+  if (applicationState !== "context-lost") return;
+  const qualitySelect = document.querySelector("#qualitySelect");
+  qualitySelect.value = "low";
+  applyQualityProfile("low");
+  await initializeRenderer(true);
+}
+
+function animate(now) {
+  animationFrameId = 0;
+  if (applicationState !== "running" || !renderer || !camera) return;
 
   try {
-    renderer = await SchwarzschildRenderer.create(canvas, (message) => {
-      loadingDetail.textContent = message;
-    });
-    camera = new FirstPersonCamera(canvas);
-    camera.speed = Number(document.querySelector("#speedInput").value);
+    const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
+    lastFrameTime = now;
+    camera.update(deltaSeconds);
+    const labelBlend = 1 - Math.exp(-4.5 * deltaSeconds);
+    settings.photonLabelOpacity +=
+      (photonLabelTarget - settings.photonLabelOpacity) * labelBlend;
+    if (Math.abs(photonLabelTarget - settings.photonLabelOpacity) < 0.001) {
+      settings.photonLabelOpacity = photonLabelTarget;
+    }
+
+    if (!renderer.render(camera, settings, now / 1000)) return;
+
+    const instantaneousFps = 1 / Math.max(deltaSeconds, 1 / 240);
+    smoothedFps += (instantaneousFps - smoothedFps) * 0.035;
+    probeCriticalRays(now);
+    updateTelemetry(now);
+    updateRecordingStatus(now);
+    stableFrameCount += 1;
+    if (stableFrameCount === STABLE_FRAMES_BEFORE_RECOVERY_CLEAR) {
+      clearContextRecoveryCount();
+    }
+    animationFrameId = requestAnimationFrame(animate);
+  } catch (error) {
+    if (renderer?.isContextLost()) return;
+    if (/allocate the temporal render targets/i.test(String(error))) {
+      writeContextRecoveryCount(1);
+    }
+    failRuntime(error);
+  }
+}
+
+async function initializeRenderer(recovering = false) {
+  const generation = ++rendererGeneration;
+  applicationState = "starting";
+  showLoadingState(
+    recovering
+      ? "Rebuilding graphics resources at safe quality…"
+      : "Preparing the WebGL2 renderer…",
+  );
+
+  try {
+    const nextRenderer = await SchwarzschildRenderer.create(
+      canvas,
+      (message) => {
+        if (generation === rendererGeneration) {
+          loadingDetail.textContent = message;
+        }
+      },
+    );
+    if (
+      generation !== rendererGeneration
+      || applicationState === "context-lost"
+      || nextRenderer.isContextLost()
+    ) {
+      return;
+    }
+
+    renderer = nextRenderer;
     renderer.setQuality(QUALITY_PROFILES[settings.quality]);
 
     const physics = runPhysicsSelfCheck();
     if (!Object.values(physics).every(Boolean)) {
-      throw new Error("The startup physics self-check did not converge. Try reloading the page.");
+      throw new Error(
+        "The startup physics self-check did not converge. Try reloading the page.",
+      );
     }
 
-    loadingDetail.textContent = `${renderer.textureSize.width}×${renderer.textureSize.height} sky loaded · optics stable`;
-    setTimeout(() => loadingScreen.classList.add("loaded"), 260);
-    statusText.textContent = "SCHWARZSCHILD FIELD · STABLE";
+    loadingDetail.textContent =
+      `${renderer.textureSize.width}×${renderer.textureSize.height} sky loaded · optics stable`;
+    applicationState = "running";
+    stableFrameCount = 0;
+    statusText.textContent = recovering
+      ? "SCHWARZSCHILD FIELD · RECOVERED"
+      : "SCHWARZSCHILD FIELD · STABLE";
     lastFrameTime = performance.now();
-    requestAnimationFrame(animate);
+    window.setTimeout(() => {
+      if (applicationState === "running") {
+        loadingScreen.classList.add("loaded");
+      }
+    }, 260);
+    animationFrameId = requestAnimationFrame(animate);
   } catch (error) {
-    loadingScreen.classList.add("loaded");
-    fatalMessage.textContent = error instanceof Error ? error.message : String(error);
-    fatalError.hidden = false;
+    if (
+      generation !== rendererGeneration
+      || applicationState === "context-lost"
+    ) {
+      return;
+    }
+    failRuntime(error);
   }
+}
+
+async function start() {
+  camera = new FirstPersonCamera(canvas);
+  bindControls();
+  camera.speed = Number(document.querySelector("#speedInput").value);
+  retryStartupButton.addEventListener("click", () => window.location.reload());
+  canvas.addEventListener("webglcontextlost", handleContextLost, false);
+  canvas.addEventListener(
+    "webglcontextrestored",
+    () => void handleContextRestored(),
+    false,
+  );
+  await initializeRenderer(false);
 }
 
 start();

@@ -9,12 +9,13 @@
   the temporal passes were studied as behavioral references and were not copied
 - **Use in this project:** The active station object map and procedural material
   helpers were ported into `shaders/orbital_station.glsl`, with source symbols
-  namespaced for this renderer. The source-radius-8 ring hull is uniformly
-  scaled by the Schwarzschild photon-sphere radius divided by 8, curved along
-  spherical latitude, duplicated at two latitudes per hemisphere, and mirrored
-  above and below a clear equatorial gap. The four copies rotate together about
-  their shared polar axis, with geometry and procedural materials evaluated in
-  the same rotating object space. Its CityBlock greebles, panel shader, edge
+  namespaced for this renderer. The source-radius-8 ring hull is scaled by the
+  Schwarzschild photon-sphere radius divided by 8, curved along spherical
+  latitude, and instantiated as three nested doublets. The central pair lies at
+  the photon sphere, while the outer and inner pairs use neighboring radii in
+  the same 0° equatorial plane. All three rotate around their common polar axis,
+  with independently staggered procedural phases. Its CityBlock greebles,
+  panel shader, edge
   rails, material IDs, and noise are retained. Surface refinement,
   footprint-driven geometry detail, normals, ambient occlusion, and the
   deterministic soft-shadow marcher are specific to this adaptation. The
@@ -139,3 +140,27 @@ dishes. A second precise edit moved the inner bands toward the equator while
 preserving the four-band count and symmetry. The card contains no text, logo,
 or watermark. It is used only for Open Graph and Twitter cards and is not
 sampled by the WebGL renderer.
+
+### `assets/social-preview-three-doublets.png`
+
+Project-owned 1730 × 909 social preview generated with OpenAI's built-in
+image-generation tool on 1 August 2026 by editing the preceding four-band card.
+The prompt retained the centered black-hole shadow, deep star field, neutral
+greebled panels, and restrained gold rails while replacing the retired layout
+with exactly three nested Dyson doublets: one horizontal pair, one outer pair
+rolled `+45°`, and one inner pair rolled `−45°`. It explicitly prohibited
+radial spokes, center-facing pipes, hubs, masts, antennas, dishes, planets,
+accretion disks, extra rings, text, logos, and watermarks. It is used only for
+Open Graph and Twitter cards and is not sampled by the WebGL renderer.
+
+### `assets/social-preview-coplanar-doublets.png`
+
+Project-owned 1731 × 909 social preview generated with OpenAI's built-in
+image-generation tool on 1 August 2026 by editing the preceding three-doublet
+card. The prompt preserved its centered black-hole shadow, star field, neutral
+greebled panels, restrained gold rails, wide framing, and lighting while moving
+all three nested doublets into the same 0° equatorial plane. It required exactly
+six bands total with no diagonal or crossed rings, and prohibited radial spokes,
+center-facing pipes, hubs, masts, antennas, dishes, planets, accretion disks,
+extra rings, text, logos, and watermarks. It is used only for Open Graph and
+Twitter cards and is not sampled by the WebGL renderer.

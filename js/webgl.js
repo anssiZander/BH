@@ -1,17 +1,23 @@
+const RUNTIME_ASSET_VERSION = "20260801-context-v4";
+const runtimeAsset = (path) => `${path}?v=${RUNTIME_ASSET_VERSION}`;
+
 const SHADER_PATHS = {
-  vertex: "shaders/fullscreen.vert",
-  fragment: "shaders/schwarzschild.frag",
-  orbitalStation: "shaders/orbital_station.glsl",
-  fxaa: "shaders/fxaa.frag",
-  rcas: "shaders/rcas.frag",
+  vertex: runtimeAsset("shaders/fullscreen.vert"),
+  fragment: runtimeAsset("shaders/schwarzschild.frag"),
+  orbitalStation: runtimeAsset("shaders/orbital_station.glsl"),
+  fxaa: runtimeAsset("shaders/fxaa.frag"),
+  rcas: runtimeAsset("shaders/rcas.frag"),
 };
 
-const SKY_TEXTURE_PATH = "assets/galaxy_4k.jpg";
+const SKY_TEXTURE_PATH = runtimeAsset("assets/galaxy_4k.jpg");
 const ORBITAL_STATION_MARKER = "/*__ORBITAL_STATION_GLSL__*/";
 const MAX_HISTORY_FRAME_GAP = 0.12;
 const TEMPORAL_HISTORY_WEIGHT = 0.9;
 const RCAS_SHARPNESS = 0.18;
 const ZERO_JITTER = [0, 0];
+const ASSET_RETRY_DELAYS = [0, 350, 800, 1600, 3200, 5000];
+const MAX_SKY_TEXTURE_WIDTH = 3072;
+const TARGET_SIZE_RETRY_FACTORS = [1, 0.75, 0.5];
 
 function radicalInverse(index, base) {
   let value = 0;
@@ -34,12 +40,46 @@ function shaderTypeName(gl, type) {
   return type === gl.VERTEX_SHADER ? "vertex" : "fragment";
 }
 
-async function fetchText(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Could not load ${url} (${response.status}).`);
+function wait(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function assetName(url) {
+  return url.split("?")[0].split("/").pop() || url;
+}
+
+async function retryAsset(url, operation, onRetry = () => {}) {
+  let lastError = null;
+  for (let attempt = 0; attempt < ASSET_RETRY_DELAYS.length; attempt += 1) {
+    const delay = ASSET_RETRY_DELAYS[attempt];
+    if (delay > 0) {
+      onRetry(
+        `Reconnecting to ${assetName(url)} · attempt ${attempt + 1}/${ASSET_RETRY_DELAYS.length}`,
+      );
+      await wait(delay);
+    }
+    try {
+      return await operation(attempt);
+    } catch (error) {
+      lastError = error;
+    }
   }
-  return response.text();
+
+  const reason = lastError instanceof Error ? ` ${lastError.message}` : "";
+  throw new Error(
+    `Could not reach ${assetName(url)} after ${ASSET_RETRY_DELAYS.length} attempts.${reason} `
+      + "If this is a local preview, restart Live Server and press Retry startup.",
+  );
+}
+
+async function fetchText(url, onRetry) {
+  return retryAsset(url, async () => {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`The server returned HTTP ${response.status}.`);
+    }
+    return response.text();
+  }, onRetry);
 }
 
 function compileShader(gl, type, source) {
@@ -69,17 +109,42 @@ function linkProgram(gl, vertexShader, fragmentShader) {
   return program;
 }
 
-function loadImage(url) {
-  return new Promise((resolve, reject) => {
+async function loadImage(url, onRetry) {
+  return retryAsset(url, (attempt) => new Promise((resolve, reject) => {
     const image = new Image();
     image.decoding = "async";
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error(`Could not load the local sky texture at ${url}.`));
-    image.src = url;
-  });
+    image.onerror = () => reject(new Error("The image request failed."));
+    const separator = url.includes("?") ? "&" : "?";
+    image.src = `${url}${separator}attempt=${attempt}`;
+  }), onRetry);
 }
 
 function createSkyTexture(gl, image) {
+  const maximumTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  const scale = Math.min(
+    1,
+    Math.min(MAX_SKY_TEXTURE_WIDTH, maximumTextureSize) / image.naturalWidth,
+    maximumTextureSize / image.naturalHeight,
+  );
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+  let source = image;
+
+  if (width !== image.naturalWidth || height !== image.naturalHeight) {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) {
+      throw new Error("Could not create the sky downsampling surface.");
+    }
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(image, 0, 0, width, height);
+    source = canvas;
+  }
+
   const texture = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
@@ -93,12 +158,12 @@ function createSkyTexture(gl, image) {
     gl.SRGB8_ALPHA8,
     gl.RGBA,
     gl.UNSIGNED_BYTE,
-    image,
+    source,
   );
   gl.generateMipmap(gl.TEXTURE_2D);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.bindTexture(gl.TEXTURE_2D, null);
-  return texture;
+  return { texture, width, height };
 }
 
 async function createPhotonLabelTexture(gl) {
@@ -185,13 +250,55 @@ function createSceneTarget(gl) {
 }
 
 function resizeSceneTarget(gl, target, width, height) {
+  if (gl.isContextLost()) return false;
   gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
-  const attachments = [
-    [target.colorTexture, gl.COLOR_ATTACHMENT0],
-    [target.motionTexture, gl.COLOR_ATTACHMENT1],
-  ];
-  for (const [texture, attachment] of attachments) {
-    gl.bindTexture(gl.TEXTURE_2D, texture);
+  let complete = false;
+  try {
+    const attachments = [
+      [target.colorTexture, gl.COLOR_ATTACHMENT0],
+      [target.motionTexture, gl.COLOR_ATTACHMENT1],
+    ];
+    for (const [texture, attachment] of attachments) {
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA8,
+        width,
+        height,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        null,
+      );
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        attachment,
+        gl.TEXTURE_2D,
+        texture,
+        0,
+      );
+    }
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    const error = gl.getError();
+    complete =
+      status === gl.FRAMEBUFFER_COMPLETE
+      && error === gl.NO_ERROR
+      && !gl.isContextLost();
+  } finally {
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+  return complete;
+}
+
+function resizeColorTarget(gl, target, width, height) {
+  if (gl.isContextLost()) return false;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+  let complete = false;
+  try {
+    gl.bindTexture(gl.TEXTURE_2D, target.texture);
     gl.texImage2D(
       gl.TEXTURE_2D,
       0,
@@ -205,47 +312,31 @@ function resizeSceneTarget(gl, target, width, height) {
     );
     gl.framebufferTexture2D(
       gl.FRAMEBUFFER,
-      attachment,
+      gl.COLOR_ATTACHMENT0,
       gl.TEXTURE_2D,
-      texture,
+      target.texture,
       0,
     );
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    const error = gl.getError();
+    complete =
+      status === gl.FRAMEBUFFER_COMPLETE
+      && error === gl.NO_ERROR
+      && !gl.isContextLost();
+  } finally {
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
-  gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-    throw new Error("The temporal scene render target is incomplete.");
-  }
-  gl.bindTexture(gl.TEXTURE_2D, null);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return complete;
 }
 
-function resizeColorTarget(gl, target, width, height) {
-  gl.bindTexture(gl.TEXTURE_2D, target.texture);
-  gl.texImage2D(
-    gl.TEXTURE_2D,
-    0,
-    gl.RGBA8,
-    width,
-    height,
-    0,
-    gl.RGBA,
-    gl.UNSIGNED_BYTE,
-    null,
-  );
-  gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
-  gl.framebufferTexture2D(
-    gl.FRAMEBUFFER,
-    gl.COLOR_ATTACHMENT0,
-    gl.TEXTURE_2D,
-    target.texture,
-    0,
-  );
-  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-    throw new Error("The anti-aliasing render target is incomplete.");
+function resizeTargetSet(gl, sceneTarget, historyTargets, width, height) {
+  if (!resizeSceneTarget(gl, sceneTarget, width, height)) return false;
+  for (const target of historyTargets) {
+    if (!resizeColorTarget(gl, target, width, height)) return false;
   }
-  gl.bindTexture(gl.TEXTURE_2D, null);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return !gl.isContextLost();
 }
 
 function settingsSignature(settings) {
@@ -253,13 +344,11 @@ function settingsSignature(settings) {
     settings.maxSteps,
     settings.baseStep,
     settings.fov,
-    settings.gridBrightness,
     settings.shellCount,
     settings.exposure,
     settings.saturation,
     settings.stationRotationSpeed,
     settings.lensing,
-    settings.gridVisible,
     settings.spheresVisible,
     settings.skyVisible,
     settings.ringsVisible,
@@ -268,17 +357,28 @@ function settingsSignature(settings) {
 
 export class SchwarzschildRenderer {
   static async create(canvas, onProgress = () => {}) {
-    const gl = canvas.getContext("webgl2", {
+    const contextAttributes = {
       alpha: false,
       antialias: false,
       depth: false,
       stencil: false,
       powerPreference: "high-performance",
       preserveDrawingBuffer: false,
-    });
+    };
+    let gl = canvas.getContext("webgl2", contextAttributes);
 
     if (!gl) {
-      throw new Error("This browser or graphics driver does not provide a WebGL2 context.");
+      onProgress("Retrying WebGL2 with compatibility settings…");
+      gl = canvas.getContext("webgl2", {
+        ...contextAttributes,
+        powerPreference: "default",
+      });
+    }
+
+    if (!gl) {
+      throw new Error(
+        "This browser or graphics driver did not provide a WebGL2 context, even with compatibility settings.",
+      );
     }
 
     onProgress("Loading standalone GLSL shaders…");
@@ -289,11 +389,11 @@ export class SchwarzschildRenderer {
       fxaaSource,
       rcasSource,
     ] = await Promise.all([
-      fetchText(SHADER_PATHS.vertex),
-      fetchText(SHADER_PATHS.fragment),
-      fetchText(SHADER_PATHS.orbitalStation),
-      fetchText(SHADER_PATHS.fxaa),
-      fetchText(SHADER_PATHS.rcas),
+      fetchText(SHADER_PATHS.vertex, onProgress),
+      fetchText(SHADER_PATHS.fragment, onProgress),
+      fetchText(SHADER_PATHS.orbitalStation, onProgress),
+      fetchText(SHADER_PATHS.fxaa, onProgress),
+      fetchText(SHADER_PATHS.rcas, onProgress),
     ]);
     const markerCount = fragmentTemplate.split(ORBITAL_STATION_MARKER).length - 1;
     if (markerCount !== 1) {
@@ -318,8 +418,8 @@ export class SchwarzschildRenderer {
     gl.deleteShader(fxaaShader);
     gl.deleteShader(rcasShader);
 
-    onProgress("Decoding the 4K spherical sky field…");
-    const skyImage = await loadImage(SKY_TEXTURE_PATH);
+    onProgress("Decoding and fitting the spherical sky field…");
+    const skyImage = await loadImage(SKY_TEXTURE_PATH, onProgress);
     const skyTexture = createSkyTexture(gl, skyImage);
     const photonLabelTexture = await createPhotonLabelTexture(gl);
 
@@ -329,11 +429,11 @@ export class SchwarzschildRenderer {
       program,
       fxaaProgram,
       rcasProgram,
-      skyTexture,
+      skyTexture.texture,
       photonLabelTexture,
       {
-        width: skyImage.naturalWidth,
-        height: skyImage.naturalHeight,
+        width: skyTexture.width,
+        height: skyTexture.height,
       },
     );
   }
@@ -402,11 +502,9 @@ export class SchwarzschildRenderer {
       "uMaxSteps",
       "uBaseStep",
       "uLensing",
-      "uGridVisible",
       "uSpheresVisible",
       "uSkyVisible",
       "uRingsVisible",
-      "uGridBrightness",
       "uShellCount",
       "uExposure",
       "uSaturation",
@@ -468,7 +566,12 @@ export class SchwarzschildRenderer {
     this.frameIndex = 0;
   }
 
+  isContextLost() {
+    return this.gl.isContextLost();
+  }
+
   resizeIfNeeded() {
+    if (this.gl.isContextLost()) return false;
     const cssWidth = Math.max(1, this.canvas.clientWidth);
     const cssHeight = Math.max(1, this.canvas.clientHeight);
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -478,7 +581,7 @@ export class SchwarzschildRenderer {
       cssHeight === this.lastCssHeight &&
       dpr === this.lastDpr
     ) {
-      return false;
+      return true;
     }
 
     let width = Math.max(1, Math.round(cssWidth * dpr * this.renderScale));
@@ -490,22 +593,53 @@ export class SchwarzschildRenderer {
       height = Math.max(1, Math.round(height * correction));
     }
 
-    this.canvas.width = width;
-    this.canvas.height = height;
+    const maximumTextureSize = this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE);
+    const maximumViewport = this.gl.getParameter(this.gl.MAX_VIEWPORT_DIMS);
+    width = Math.min(width, maximumTextureSize, maximumViewport[0]);
+    height = Math.min(height, maximumTextureSize, maximumViewport[1]);
+
+    let allocatedWidth = 0;
+    let allocatedHeight = 0;
+    for (const factor of TARGET_SIZE_RETRY_FACTORS) {
+      if (this.gl.isContextLost()) return false;
+      const candidateWidth = Math.max(1, Math.round(width * factor));
+      const candidateHeight = Math.max(1, Math.round(height * factor));
+      if (
+        resizeTargetSet(
+          this.gl,
+          this.sceneTarget,
+          this.historyTargets,
+          candidateWidth,
+          candidateHeight,
+        )
+      ) {
+        allocatedWidth = candidateWidth;
+        allocatedHeight = candidateHeight;
+        break;
+      }
+    }
+
+    if (this.gl.isContextLost()) return false;
+    if (allocatedWidth === 0 || allocatedHeight === 0) {
+      throw new Error(
+        `Could not allocate the temporal render targets at or below ${width}×${height}. `
+          + "Choose a lower quality profile and press Retry startup.",
+      );
+    }
+
+    this.canvas.width = allocatedWidth;
+    this.canvas.height = allocatedHeight;
     this.lastCssWidth = cssWidth;
     this.lastCssHeight = cssHeight;
     this.lastDpr = dpr;
-    resizeSceneTarget(this.gl, this.sceneTarget, width, height);
-    for (const target of this.historyTargets) {
-      resizeColorTarget(this.gl, target, width, height);
-    }
     this.invalidateHistory();
-    this.gl.viewport(0, 0, width, height);
+    this.gl.viewport(0, 0, allocatedWidth, allocatedHeight);
     return true;
   }
 
   render(camera, settings, timeSeconds) {
-    this.resizeIfNeeded();
+    if (this.gl.isContextLost()) return false;
+    if (!this.resizeIfNeeded()) return false;
 
     const gl = this.gl;
     const u = this.uniforms;
@@ -539,13 +673,7 @@ export class SchwarzschildRenderer {
     // Lensed images do not have a pinhole inverse motion map. Keep them
     // spatially stable instead of injecting temporal jitter that cannot be
     // reprojected correctly.
-    const jitterSafe =
-      motionValid
-      && !settings.lensing
-      && !(
-        settings.gridVisible
-        && settings.gridBrightness > 0
-      );
+    const jitterSafe = motionValid && !settings.lensing;
     const jitter = !jitterSafe
       ? ZERO_JITTER
       : TEMPORAL_JITTER[
@@ -605,17 +733,16 @@ export class SchwarzschildRenderer {
     gl.uniform1i(u.uMaxSteps, settings.maxSteps);
     gl.uniform1f(u.uBaseStep, settings.baseStep);
     gl.uniform1i(u.uLensing, settings.lensing ? 1 : 0);
-    gl.uniform1i(u.uGridVisible, settings.gridVisible ? 1 : 0);
     gl.uniform1i(u.uSpheresVisible, settings.spheresVisible ? 1 : 0);
     gl.uniform1i(u.uSkyVisible, settings.skyVisible ? 1 : 0);
     gl.uniform1i(u.uRingsVisible, settings.ringsVisible ? 1 : 0);
-    gl.uniform1f(u.uGridBrightness, settings.gridBrightness);
     gl.uniform1i(u.uShellCount, settings.shellCount);
     gl.uniform1f(u.uExposure, settings.exposure);
     gl.uniform1f(u.uSaturation, settings.saturation);
     gl.uniform1f(u.uPhotonLabelOpacity, settings.photonLabelOpacity);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (gl.isContextLost()) return false;
 
     const historyRead = this.historyTargets[this.historyIndex];
     const historyWriteIndex = 1 - this.historyIndex;
@@ -643,6 +770,7 @@ export class SchwarzschildRenderer {
       historyBlend,
     );
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (gl.isContextLost()) return false;
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.useProgram(this.rcasProgram);
@@ -656,6 +784,7 @@ export class SchwarzschildRenderer {
     gl.uniform1f(this.rcasUniforms.uSharpness, RCAS_SHARPNESS);
     gl.enable(gl.DITHER);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (gl.isContextLost()) return false;
     gl.disable(gl.DITHER);
     gl.activeTexture(gl.TEXTURE0);
 
@@ -669,5 +798,6 @@ export class SchwarzschildRenderer {
     this.historyIndex = historyWriteIndex;
     this.historyValid = true;
     this.frameIndex += 1;
+    return true;
   }
 }

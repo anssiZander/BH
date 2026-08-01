@@ -3,25 +3,22 @@
  * by morimea, based on WlKXzm, "Orbital Megastructure" by Otavio Good.
  *
  * This file preserves the source ring hull and procedural material helpers,
- * then folds two band copies over each hemisphere's spherical latitude and
- * mirrors them across the equator. The source cross-lattice, hub, radial
+ * then maps three independently oriented double-band assemblies onto nested
+ * spherical radii. The source cross-lattice, hub, radial
  * spokes, communications mast, and dishes are intentionally omitted from the
  * rendered scene along with camera state, Earth/environment rendering, TAA,
  * FSR, post-processing, and otherwise dead geometry.
  *
- * Inclusion contract: PI, PHOTON_RHO, STATION_INNER_BAND_LATITUDE,
- * STATION_OUTER_BAND_LATITUDE, uTime, uStationRotationSpeed,
+ * Inclusion contract: PI, PHOTON_RHO, STATION_ASSEMBLY_COUNT,
+ * STATION_DOUBLE_BAND_LATITUDE, STATION_ENVELOPE_HALF_ANGLE,
+ * STATION_RADIAL_ENVELOPE, stationAssemblyRadius(int),
+ * stationWorldToAssembly(vec3, int),
+ * stationAssemblyToWorld(vec3, int), uTime, uStationRotationSpeed,
  * uCameraPosition, uResolution, uFovY, and saturate(float) are defined first.
  */
 
 const float STATION_SCALE = PHOTON_RHO / 8.0;
 const float STATION_BAND_HALF_ARC = 1.0;
-const float STATION_BAND_PHASES[4] = float[](
-    1.731,
-    14.487,
-    27.926,
-    38.204
-);
 
 const uint STATION_MAT_FLOOR = 1u;
 const uint STATION_MAT_WALL = 2u;
@@ -45,6 +42,22 @@ const uint STATION_NICE_COLORS[4] = uint[](
 
 const float STATION_INV_MAX_24_BIT = 1.0 / float(0xffffff);
 const vec2 STATION_ZERO_ONE = vec2(0.0, 1.0);
+
+float stationBandPhase(int assemblyIndex, bool negativeBand) {
+    if (assemblyIndex == 1) {
+        return negativeBand ? 40.613 : 10.487;
+    }
+    if (assemblyIndex == 2) {
+        return negativeBand ? 41.982 : 19.926;
+    }
+    return negativeBand ? 28.204 : 1.731;
+}
+
+float stationLongitudeHalfSpan(int assemblyIndex) {
+    if (assemblyIndex == 1) return 30.0;
+    if (assemblyIndex == 2) return 22.0;
+    return 26.0;
+}
 
 vec2 stationRotate(vec2 value, float radians) {
     float cosine = cos(radians);
@@ -85,11 +98,81 @@ vec3 stationRotateZ(vec3 value, float radians) {
     );
 }
 
-vec3 stationRotatingSourcePoint(vec3 sourcePoint) {
+vec3 stationAssemblyRotatingSourcePoint(
+    vec3 sourcePoint,
+    int assemblyIndex,
+    float time
+) {
+    vec3 assemblyPoint =
+        stationWorldToAssembly(sourcePoint, assemblyIndex);
     return stationRotateY(
-        sourcePoint,
-        uStationRotationSpeed * uTime
+        assemblyPoint,
+        uStationRotationSpeed * time
     );
+}
+
+vec3 stationAssemblyRotatingDirection(
+    vec3 worldDirection,
+    int assemblyIndex,
+    float time
+) {
+    vec3 assemblyDirection =
+        stationWorldToAssembly(worldDirection, assemblyIndex);
+    return stationRotateY(
+        assemblyDirection,
+        uStationRotationSpeed * time
+    );
+}
+
+float stationAssemblySourceEnvelope(
+    vec3 sourcePoint,
+    int assemblyIndex
+) {
+    vec3 assemblyPoint =
+        stationWorldToAssembly(sourcePoint, assemblyIndex);
+    float stationRadius = length(assemblyPoint);
+    float stationLatitude = asin(
+        clamp(
+            abs(assemblyPoint.y) / max(stationRadius, 1e-8),
+            0.0,
+            1.0
+        )
+    );
+    float angularEnvelope =
+        stationRadius
+        * sin(
+            abs(
+                stationLatitude
+                - STATION_DOUBLE_BAND_LATITUDE
+            )
+            - STATION_ENVELOPE_HALF_ANGLE
+    );
+    float targetRadius =
+        stationAssemblyRadius(assemblyIndex) / STATION_SCALE;
+    float radialEnvelope =
+        abs(stationRadius - targetRadius)
+        - STATION_RADIAL_ENVELOPE / STATION_SCALE;
+    return max(radialEnvelope, angularEnvelope);
+}
+
+int stationClosestAssemblyIndex(vec3 sourcePoint) {
+    int closestIndex = 0;
+    float closestEnvelope = 1e20;
+    for (
+        int assemblyIndex = 0;
+        assemblyIndex < STATION_ASSEMBLY_COUNT;
+        ++assemblyIndex
+    ) {
+        float envelope = stationAssemblySourceEnvelope(
+            sourcePoint,
+            assemblyIndex
+        );
+        if (envelope < closestEnvelope) {
+            closestEnvelope = envelope;
+            closestIndex = assemblyIndex;
+        }
+    }
+    return closestIndex;
 }
 
 float stationMicroDetailCoverage(vec3 unrotatedSourcePoint) {
@@ -506,8 +589,10 @@ float stationTruss(
     );
 }
 
-vec3 stationBandTransform(vec3 point) {
+vec3 stationBandTransform(vec3 point, int assemblyIndex) {
     float sphereRadius = max(length(point), 1e-8);
+    float targetSourceRadius =
+        stationAssemblyRadius(assemblyIndex) / STATION_SCALE;
     float equatorialRadius = length(point.xz);
     float longitude =
         equatorialRadius > 1e-8
@@ -516,24 +601,21 @@ vec3 stationBandTransform(vec3 point) {
     float latitude = asin(
         clamp(point.y / sphereRadius, -1.0, 1.0)
     );
-    float foldedLatitude = abs(latitude);
-    float innerBandOffset =
-        foldedLatitude - STATION_INNER_BAND_LATITUDE;
-    float outerBandOffset =
-        foldedLatitude - STATION_OUTER_BAND_LATITUDE;
-    bool outerBand =
-        abs(outerBandOffset) < abs(innerBandOffset);
     float nearestBandOffset =
-        outerBand ? outerBandOffset : innerBandOffset;
-    // Stratify the four deterministic pseudo-random phases around the full
-    // 52-unit circumference. Each copy samples a distant city-cell sequence
-    // instead of merely nudging the same longitudinal pattern.
-    int bandIndex = (outerBand ? 2 : 0) + (latitude < 0.0 ? 1 : 0);
-    float bandPhase = STATION_BAND_PHASES[bandIndex];
+        abs(latitude) - STATION_DOUBLE_BAND_LATITUDE;
+    // Stratify the six deterministic pseudo-random phases around each full
+    // circumference. Integer cell counts keep the longitude seam closed while
+    // the three radii retain approximately equal-size longitudinal details.
+    float bandPhase = stationBandPhase(
+        assemblyIndex,
+        latitude < 0.0
+    );
     return vec3(
-        26.0 * (longitude / PI) + bandPhase,
+        stationLongitudeHalfSpan(assemblyIndex)
+            * (longitude / PI)
+            + bandPhase,
         sphereRadius * nearestBandOffset,
-        sphereRadius
+        8.0 + sphereRadius - targetSourceRadius
     );
 }
 
@@ -630,7 +712,10 @@ void stationCityBlock(
         / length(
             vec2(
                 integerCell.x,
-                ((integerCell.y + 50) % 100 - 50) * 8
+                (
+                    mod(float(integerCell.y) + 50.0, 100.0)
+                    - 50.0
+                ) * 8.0
             )
         )
     );
@@ -930,17 +1015,18 @@ void stationCityBlock(
     }
 }
 
-void stationDistanceToObjectSource(
+void stationDistanceToAssemblySource(
     vec3 point,
+    int assemblyIndex,
+    float microDetailCoverage,
     out float distanceValue,
     out uint material
 ) {
-    float microDetailCoverage =
-        stationMicroDetailCoverage(point);
-    point = stationRotatingSourcePoint(point);
-
     float density = 8.0;
-    vec3 bandCoordinates = stationBandTransform(point);
+    vec3 bandCoordinates = stationBandTransform(
+        point,
+        assemblyIndex
+    );
     vec3 cylindrical = bandCoordinates;
     cylindrical.x *= density;
 
@@ -1002,6 +1088,28 @@ void stationDistanceToObjectSource(
         material,
         geometryDistance,
         STATION_MAT_SPOKE
+    );
+}
+
+void stationDistanceToObjectSource(
+    vec3 point,
+    out float distanceValue,
+    out uint material
+) {
+    float microDetailCoverage =
+        stationMicroDetailCoverage(point);
+    int assemblyIndex = stationClosestAssemblyIndex(point);
+    vec3 assemblyPoint = stationAssemblyRotatingSourcePoint(
+        point,
+        assemblyIndex,
+        uTime
+    );
+    stationDistanceToAssemblySource(
+        assemblyPoint,
+        assemblyIndex,
+        microDetailCoverage,
+        distanceValue,
+        material
     );
 }
 

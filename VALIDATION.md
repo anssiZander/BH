@@ -2,8 +2,8 @@
 
 The baseline measurements below were recorded on 28 July 2026. The
 numerical-optics section remains the baseline for the unchanged ray equation.
-The final section records the 29 July 2026 source, geometry, envelope,
-distribution, HTTP, and share-image checks for the four-band revision.
+Later dated sections record each superseding geometry, motion, distribution,
+HTTP, and share-image revision.
 
 ## Recorded baseline: runtime and rendering
 
@@ -306,3 +306,107 @@ impact-parameter-aware fallback instead of being allowed to stall the GPU.
 - Identical W input at two unrelated yaw angles produced zero target-velocity
   difference. W's normalized inward alignment measured `1.000000025`, while
   D's radial dot product was exactly zero in the deterministic camera check.
+
+## Three nested coplanar Dyson doublets (1 August 2026)
+
+- The active construction contains exactly three spherical double-band
+  assemblies, or six bands total. Every pair is centered at latitudes
+  `±0.1875` radians around one shared clear equator.
+- The middle assembly remains at isotropic radius
+  `ρ = 1.8660254038M`, exactly areal radius `3M`. The outer and inner
+  assemblies use `ρphoton ± 0.30M`, converting to areal radii `3.281444M` and
+  `2.725665M` respectively.
+- All three assemblies have zero roll and share the same world-space equatorial
+  plane and polar rotation axis. Their radii and irregular procedural phases
+  remain independent, while world-to-assembly and assembly-to-world mappings
+  are exact identities.
+- Center samples for all three assemblies produced envelope distance `−0.11M`
+  and selected their own assembly over both competitors. The source-radius
+  remap recenters every shell on the authored radius `8`, while seam-safe
+  longitude spans yield `416`, `480`, and `352` complete procedural cells.
+- The six longitudinal phases are deterministic and irregularly staggered as
+  `(1.731, 28.204)`, `(10.487, 40.613)`, and `(19.926, 41.982)`.
+  Their circular pair separations are within `0.473`, `0.126`, and `0.056`
+  source units of the respective half-circumferences, so neither doublet
+  member nor adjacent-radius assemblies align their CityBlock, panel, rail, or
+  window patterns.
+- The Open Graph card is a 1730 × 909 project-owned image showing exactly three
+  nested coplanar doublets with the retired center-facing pipes, hub, mast,
+  antenna, and dishes absent.
+- The coplanar portability pass produces an `88,735`-byte assembled scene. The
+  orbital-station source SHA-256 is
+  `9da1f53eff8f61294daf09a1d5673588100615919603449bfb3d83fc1e9682fc`;
+  the assembled scene SHA-256 is
+  `0422057044f33433615ab786062f28e314b90f49795e88462273d6177af3d213`.
+- All `22` source/distribution runtime pairs are byte-identical. JavaScript
+  syntax checks, the distribution Worker check, the DOM-reference audit, and
+  `git diff --check` pass.
+
+## Grid retirement and shader-startup hardening (1 August 2026)
+
+- The coordinate-grid feature is removed end to end: there is no grid-light
+  slider or grid switch, no JavaScript setting or uniform upload, and no GLSL
+  grid intersection, pipe, emission, or shell-step work. Optional opaque sphere
+  skins and the equatorial photon label retain their independent shell logic.
+- A production-version audit found every HTML, JavaScript, shader, texture, and
+  font resource reachable. A clean archived Chrome run also reached the sky
+  decoding stage, which is entered only after all shader fetches, compilation,
+  and program links complete. This rules out a general missing-shader failure.
+- The most plausible session-specific failure was an old cached
+  `orbital_station.glsl` being combined with a newer
+  `schwarzschild.frag`, or the reverse. Those files changed their shared
+  inclusion contract while retaining stable URLs, so a mixed pair cannot
+  compile. The HTML module entry, its imports, all shader requests, and the sky
+  texture now share the `20260801-context-v4` revision. Shader text requests
+  additionally use `cache: "no-store"`, guaranteeing a coherent pair after the
+  update.
+- Shader and sky requests now retry through a bounded 10.95-second reconnect
+  window. Progress identifies the asset and attempt count; exhaustion reports
+  that the local server may have stopped and exposes a `Retry startup` action.
+- WebGL2 context creation first requests the discrete/high-performance path and
+  falls back once to the browser's default power preference before declaring
+  the graphics context unavailable.
+- Runtime-indexed constant arrays in the three-assembly path were replaced by
+  branch accessors. The final coplanar layout removes the retired frame-rotation
+  math entirely, and wrapped city-cell math uses defined floating-point `mod()`
+  rather than a signed integer remainder. These changes reduce
+  translator-dependent behavior while preserving the three-doublet geometry.
+
+## GPU-memory and context-loss recovery (1 August 2026)
+
+- The reported temporal-framebuffer exception occurred only after
+  `CONTEXT_LOST_WEBGL`; two RGBA8 color attachments are WebGL2 core and were not
+  the underlying incompatibility. Allocation code now distinguishes a lost
+  context from an intact but unavailable framebuffer and never labels the
+  former as an incomplete temporal target.
+- The nominal `galaxy_4k.jpg` source is actually `6000 × 3000`. Its former
+  full-resolution SRGB8-alpha mip chain occupied about `91.55 MiB` of GPU
+  memory. It is now resampled to at most `3072 × 1536`, also bounded by
+  `MAX_TEXTURE_SIZE`, reducing that chain to about `24 MiB` while retaining
+  mipmapped minification.
+- Render-target caps are now `0.75`, `1.5`, `2.0`, and `3.0` megapixels from
+  Low through Ultra, with Medium selected by default. Width and height are
+  additionally clamped to `MAX_TEXTURE_SIZE` and `MAX_VIEWPORT_DIMS`.
+- An intact-context allocation failure retries the complete scene/history set
+  at `75%` and `50%` dimensions. CSS size and DPR caches are committed only
+  after every target is complete, so a failed allocation cannot poison the
+  next retry.
+- `webglcontextlost` prevents the default permanent loss, stops the animation
+  loop, and makes no further rendering calls. `webglcontextrestored` rebuilds
+  shaders, textures, framebuffers, and temporal state at Low quality before
+  resuming. The runtime loop catches unexpected failures and schedules another
+  frame only after a successful render.
+- A data favicon suppresses the unrelated automatic `/favicon.ico` request and
+  its harmless 404 console entry.
+- Deterministic allocation tests resampled a mocked `6000 × 3000` source to
+  `3072 × 1536`, then forced the first target-set attempt to fail and confirmed
+  that the `75%` retry completed at `750 × 750`, updated the viewport, and only
+  then committed the CSS/DPR cache. Lost-context and compatibility-context
+  branches return controlled states rather than throwing from the frame loop.
+- All JavaScript modules and the distribution Worker pass syntax checks; all
+  `40` HTML IDs satisfy the `26` JavaScript ID references. The `88,735`-byte
+  assembled scene remains marker-complete with one `main()`, `28` uniform
+  declarations, and SHA-256
+  `0422057044f33433615ab786062f28e314b90f49795e88462273d6177af3d213`.
+  All `22` source/distribution runtime pairs are byte-identical, and
+  `git diff --check` passes.

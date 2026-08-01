@@ -702,6 +702,10 @@ kbd {
   line-height: 1.55;
 }
 
+.fatal-error .text-button {
+  margin-top: 14px;
+}
+
 body.ui-hidden .brand-panel {
   opacity: 0;
   transform: translateY(-12px);

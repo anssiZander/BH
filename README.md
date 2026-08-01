@@ -2,9 +2,9 @@
 
 A framework-free, real-time WebGL2 visualization of light propagation around a
 nonrotating Schwarzschild black hole. The scene contains no accretion disk:
-everything visible is the lensed sky, shaded spherical reference skins,
-spherical coordinate grids, or four optional ray-marched orbital-station bands
-curved around the photon sphere.
+everything visible is the lensed sky, optional shaded spherical reference
+skins, the photon-sphere label, or three ray-marched Dyson doublets curved
+around nested spherical radii.
 
 ## Run it
 
@@ -15,6 +15,14 @@ curved around the photon sphere.
 
 The shader files and local sky texture are loaded with `fetch()`, so opening
 `index.html` directly as a `file://` URL is intentionally unsupported.
+If the console reports `ERR_CONNECTION_REFUSED` for every shader as well as
+`styles.css`, the local Live Server process or its port has stopped; restart
+Live Server and use the newly reported local URL. That message occurs before
+GLSL compilation and is not a shader error. The renderer retries transient
+shader and sky requests for several seconds and provides a `Retry startup`
+button if the server remains unavailable. WebGL2 context creation also retries
+once with compatibility-oriented power settings before reporting a driver
+failure.
 
 ## Controls
 
@@ -27,8 +35,8 @@ The shader files and local sky texture are loaded with `fetch()`, so opening
 - R: reset the camera
 - H: hide or restore the interface
 - Escape: release pointer lock
-- Station rotation: continuously adjusts the four bands from stopped to the
-  original `0.015`-radian-per-second speed
+- Station rotation: continuously adjusts all three doublets from stopped to
+  the original `0.015`-radian-per-second speed
 - Photon label: fades a translucent yellow Orbitron `PHOTON SPHERE` inscription
   in or out on the equator of the lensed photon-sphere surface; its reading
   direction automatically reverses when the camera crosses inside
@@ -36,10 +44,9 @@ The shader files and local sky texture are loaded with `fetch()`, so opening
   editor-friendly recording; browsers without MP4 encoding fall back to WebM
 
 The instrument panel controls RK2 integration quality, base ray step, flight
-speed, station rotation, field of view, grid brightness, shell count, exposure,
-saturation, and
-the internal render resolution. Lensing, shaded spheres, spherical grids, the
-sky sphere, and the orbital-station structure can each be disabled
+speed, station rotation, field of view, shell count, exposure, saturation, and
+the internal render resolution. Lensing, shaded spheres, the sky sphere, and
+the orbital-station structure can each be disabled
 independently. The station control is labeled `Station bands` in the interface.
 Sphere skins start disabled so the enclosed station is visible on first load.
 
@@ -48,8 +55,9 @@ Sphere skins start disabled so the enclosed station is visible on first load.
 The mass is set to `M = 1` with `G = c = 1`. The event horizon is at the
 Schwarzschild areal radius `r = 2M`; rays reaching a small numerical margin
 outside its isotropic-coordinate radius `ρ = M/2` are captured and returned
-black. The highlighted yellow grid and orbital-station bands share the
-photon-sphere radius `r = 3M`, or `ρ = (2 + √3)M/2`. It is not the horizon.
+black. The photon-sphere label and middle Dyson doublet share the radius
+`r = 3M`, or `ρ = (2 + √3)M/2`; the other two doublets sit immediately outside
+and inside it. The photon sphere is not the horizon.
 
 The apparent black shape is the captured-ray region, commonly called the black
 hole shadow. Its boundary is not a directly rendered solid event-horizon
@@ -58,7 +66,7 @@ physical horizon. The flight camera is deliberately clamped just outside
 `ρ = M/2`, so this visualization does not currently allow travel through the
 horizon.
 
-The other grid shells are placed at areal radii
+The optional reference-sphere shells are placed at areal radii
 `r/M = 2.2, 2.5, 3.5, 4, 5, 6.5, 8`, with the photon sphere inserted at `3M`.
 
 ## Numerical method
@@ -76,36 +84,31 @@ gradient of `ln(n)` curves the ray. Step length shrinks near the horizon,
 photon sphere, and shell crossings, then grows in the far field. A hard quality
 budget prevents near-critical rays from stalling the GPU.
 
-Grid lines are evaluated only where an integrated ray crosses a shell.
-Crossings are solved against each local RK2 ray segment, including both roots
-when a near-tangent segment enters and exits the same sphere. A one-pixel
-coverage fringe smooths exact silhouettes, so sphere and grid edges do not form
-staircase gaps while all distortion still comes from the integrated optical
-paths.
+Optional sphere crossings are solved against each local RK2 ray segment,
+including both roots when a near-tangent segment enters and exits the same
+sphere. A one-pixel coverage fringe smooths exact silhouettes while all
+distortion still comes from the integrated optical paths.
 
-The grid pipes use a deliberately limited radial palette: magenta inside the
-photon sphere, yellow at the photon sphere, and cyan outside it. Their rounded
-cross-section is shaded in world space so the lines read as luminous 3D tubes
-rather than flat screen-space strokes.
-
-The optional sphere skins share those radii and colors. Procedural brushed
+The optional sphere skins use magenta inside the photon sphere, yellow at the
+photon sphere, and cyan outside it. Procedural brushed
 grain, shallow relief, key and fill lights, restrained highlights, and stronger
 silhouette shading establish surface direction and depth. Both the inner and
-outer faces are fully opaque. The `Spheres` and `Grids` switches are independent;
-switching `Spheres` off restores the unfilled grid view.
+outer faces are fully opaque. The `Spheres` switch removes these reference
+materials independently of the Dyson construction.
 
-Four opaque procedural station bands curve along the photon sphere at areal
-radius `r = 3M`, corresponding to isotropic radius `ρ/M = 1.86602540`. Their
-fragment-shader scene adapts the ring map from morimea's CC0
+Three opaque procedural Dyson doublets—six bands total—curve around nested
+spherical radii. The middle doublet sits at the photon sphere,
+`ρ/M = 1.86602540` (`r = 3M`). The outer and inner doublets sit at
+`ρphoton ± 0.30M`, corresponding to areal radii about `3.2814M` and `2.7257M`.
+Their fragment-shader scene adapts the ring map from morimea's CC0
 [*\[TAA\] Orbital Megastructure*](https://www.shadertoy.com/view/X33BRn).
 The source radius `8` is scaled by `ρphoton / 8`. A folded spherical-latitude
-mapping creates exact mirrored copies centered at `±0.1875` and `±0.5625`
-radians (`±10.74°` and `±32.23°`), each spanning about `14.32°`. The clear
-equatorial corridor and both gaps between adjacent bands are each about
-`7.16°` wide. All four bands rotate together about their shared polar axis at
-`0.015` radians per second, completing one revolution in about 7 minutes. The
-distance-field geometry and all procedural panel, window, and surface-noise
-coordinates use the same rotating object-space transform.
+mapping gives every assembly two bands centered at latitudes `±0.1875`
+radians (`±10.74°`) with a clear shared equator. All three nested doublets use
+the same 0° plane and rotate about their common polar axis at up to `0.015`
+radians per second, completing one revolution in about 7 minutes. Their
+procedural phases remain independently staggered, so the panels, windows, and
+greebles do not line up across radii.
 
 The adaptation retains the source CityBlock hull relief, dense procedural panel
 material, band-edge rails, material IDs, noise, finite-difference normals,
@@ -119,7 +122,7 @@ temporal-antialiasing, and post-processing code from the Shadertoy are not
 copied; the Schwarzschild camera, lensed sky, and tone mapper remain in control.
 The original project's rendering strategy informed the independently
 implemented anti-aliasing pipeline described below. The `Station bands` switch
-disables all four bands independently of spheres and grids. Because sphere
+disables all six bands independently of spheres. Because sphere
 skins are opaque, an enabled skin naturally occludes station geometry behind
 it; disable `Spheres` to inspect the complete structure.
 
@@ -149,14 +152,16 @@ reset, focus loss, and pointer-lock transitions cancel residual motion safely.
 
 ## Quality and performance
 
-`High` is the default and uses 416 RK2 steps at native device resolution up to
-its 2.6-megapixel safety cap.
-It targets smooth real-time interaction at 1080p on an RTX 4070-class GPU.
-`Low` and `Medium` reduce both ray budget and pixel count. `Ultra` raises the
-budget to 896 steps and a 115% internal render scale; it is intended for
-screenshots or powerful GPUs. Critical rays that still exhaust the budget are
-darkened gracefully, and the status display reports when sampled view rays hit
-the cap.
+`Medium` is the safe default and uses 320 RK2 steps at a `0.78` render scale up
+to a 1.5-megapixel cap. `High` uses 416 steps up to 2 megapixels, while `Ultra`
+raises the budget to 896 steps and a 115% internal scale capped at 3
+megapixels; both remain opt-in for stronger GPUs. The decoded sky panorama is
+resampled to at most `3072 × 1536` before its mipmapped GPU upload, cutting the
+largest startup allocation by about 68 MiB while preserving filtered sky
+detail. If the browser resets the WebGL context, rendering stops cleanly,
+rebuilds every GPU resource at Low quality, and resumes after restoration.
+Critical rays that still exhaust the integration budget are darkened
+gracefully, and the status display reports when sampled view rays hit the cap.
 
 ## Approximations
 
@@ -165,7 +170,6 @@ the cap.
   precision relativity solver.
 - Finite step size and finite escape radius cause small drift in extremely long
   near-critical orbits.
-- Grid emission is an artistic visualization aid and does not model radiative transfer.
 - The orbital station is an artistic visualization structure, not an accretion
   disk or a model of self-supporting matter.
 - The sphere skins are visualization surfaces, not physical matter around the hole.
