@@ -35,6 +35,7 @@ uniform float uGridBrightness;
 uniform int uShellCount;
 uniform float uExposure;
 uniform float uSaturation;
+uniform bool uProductionLinear;
 uniform sampler2D uSky;
 uniform sampler2D uPhotonLabel;
 uniform float uPhotonLabelOpacity;
@@ -1782,6 +1783,14 @@ void main() {
     sceneColor *= 1.0 - gridOpacity * 0.42;
     sceneColor += gridLight;
     sceneColor = max(sceneColor, vec3(0.0));
+    if (uProductionLinear) {
+        if (any(isnan(sceneColor)) || any(isinf(sceneColor))) {
+            sceneColor = vec3(0.0);
+        }
+        outColor = vec4(clamp(sceneColor, vec3(0.0), vec3(65504.0)), 1.0);
+        outMotion = vec4(1.0);
+        return;
+    }
     sceneColor = adjustSaturation(sceneColor, uSaturation);
     sceneColor = vec3(1.0) - exp(-sceneColor * uExposure);
     sceneColor = pow(max(sceneColor, vec3(0.0)), vec3(1.0 / 2.2));

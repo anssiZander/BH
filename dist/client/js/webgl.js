@@ -1,9 +1,9 @@
 const SHADER_PATHS = {
-  vertex: "shaders/fullscreen.vert",
-  fragment: "shaders/schwarzschild.frag",
-  orbitalStation: "shaders/orbital_station.glsl",
-  fxaa: "shaders/fxaa.frag",
-  rcas: "shaders/rcas.frag",
+  vertex: "shaders/fullscreen.vert?v=20260802-production-v1",
+  fragment: "shaders/schwarzschild.frag?v=20260802-production-v1",
+  orbitalStation: "shaders/orbital_station.glsl?v=20260802-production-v1",
+  fxaa: "shaders/fxaa.frag?v=20260802-production-v1",
+  rcas: "shaders/rcas.frag?v=20260802-production-v1",
 };
 
 const SKY_TEXTURE_PATH = "assets/galaxy_4k.jpg";
@@ -182,6 +182,19 @@ function createSceneTarget(gl) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.bindTexture(gl.TEXTURE_2D, null);
   return { colorTexture, motionTexture, framebuffer };
+}
+
+function deleteColorTarget(gl, target) {
+  if (!target) return;
+  if (target.texture) gl.deleteTexture(target.texture);
+  if (target.framebuffer) gl.deleteFramebuffer(target.framebuffer);
+}
+
+function deleteSceneTarget(gl, target) {
+  if (!target) return;
+  if (target.colorTexture) gl.deleteTexture(target.colorTexture);
+  if (target.motionTexture) gl.deleteTexture(target.motionTexture);
+  if (target.framebuffer) gl.deleteFramebuffer(target.framebuffer);
 }
 
 function resizeSceneTarget(gl, target, width, height) {
@@ -381,6 +394,7 @@ export class SchwarzschildRenderer {
     this.hasPreviousCamera = false;
     this.previousRenderTime = Number.NaN;
     this.previousSettingsSignature = "";
+    this.productionMode = false;
 
     const uniformNames = [
       "uResolution",
@@ -413,6 +427,7 @@ export class SchwarzschildRenderer {
       "uSky",
       "uPhotonLabel",
       "uPhotonLabelOpacity",
+      "uProductionLinear",
     ];
 
     for (const name of uniformNames) {
@@ -468,6 +483,43 @@ export class SchwarzschildRenderer {
     this.frameIndex = 0;
   }
 
+  beginProductionMode() {
+    if (this.productionMode) {
+      throw new Error("A production render session is already active.");
+    }
+    this.productionMode = true;
+    deleteSceneTarget(this.gl, this.sceneTarget);
+    for (const target of this.historyTargets) deleteColorTarget(this.gl, target);
+    this.sceneTarget = null;
+    this.historyTargets = [];
+    this.gl.finish();
+    this.invalidateHistory();
+  }
+
+  endProductionMode() {
+    if (!this.productionMode) return;
+    let sceneTarget = null;
+    const historyTargets = [];
+    try {
+      sceneTarget = createSceneTarget(this.gl);
+      historyTargets.push(createColorTarget(this.gl), createColorTarget(this.gl));
+    } catch (error) {
+      deleteSceneTarget(this.gl, sceneTarget);
+      for (const target of historyTargets) deleteColorTarget(this.gl, target);
+      throw error;
+    }
+    this.sceneTarget = sceneTarget;
+    this.historyTargets = historyTargets;
+    this.productionMode = false;
+    this.lastCssWidth = 0;
+    this.lastCssHeight = 0;
+    this.lastDpr = 0;
+    this.hasPreviousCamera = false;
+    this.previousRenderTime = Number.NaN;
+    this.previousSettingsSignature = "";
+    this.invalidateHistory();
+  }
+
   resizeIfNeeded() {
     const cssWidth = Math.max(1, this.canvas.clientWidth);
     const cssHeight = Math.max(1, this.canvas.clientHeight);
@@ -505,6 +557,9 @@ export class SchwarzschildRenderer {
   }
 
   render(camera, settings, timeSeconds) {
+    if (this.productionMode) {
+      throw new Error("Live rendering is suspended during production export.");
+    }
     this.resizeIfNeeded();
 
     const gl = this.gl;
@@ -614,6 +669,7 @@ export class SchwarzschildRenderer {
     gl.uniform1f(u.uExposure, settings.exposure);
     gl.uniform1f(u.uSaturation, settings.saturation);
     gl.uniform1f(u.uPhotonLabelOpacity, settings.photonLabelOpacity);
+    gl.uniform1i(u.uProductionLinear, 0);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 

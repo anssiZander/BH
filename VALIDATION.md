@@ -306,3 +306,84 @@ impact-parameter-aware fallback instead of being allowed to stall the GPU.
 - Identical W input at two unrelated yaw angles produced zero target-velocity
   difference. W's normalized inward alignment measured `1.000000025`, while
   D's radial dot product was exactly zero in the deterministic camera check.
+
+## Production-render implementation checks (2 August 2026)
+
+This section records only checks actually performed for the camera-track and
+offline PNG implementation. Historical browser/GPU results above do not count
+as validation of the new production framebuffer path.
+
+### Automated camera-track and source checks
+
+Command:
+
+```powershell
+node --test tests/*.test.mjs
+```
+
+Observed result: **14/14 tests passed**. The test set covered:
+
+- camera-basis/quaternion round trips and the `+179°` to `-179°` shortest arc;
+- real fake-clock recorder timing and JSON save/parse/validation endpoints;
+- time-aware smoothed interpolation under deliberately uneven sample spacing;
+- exact first/last states, 1,001 samples of an antipodal near-guard path, and
+  fallback from an unsafe smoothed station position toward its raw segment;
+- strict settings/non-finite rejection;
+- the half-open 30 fps frame policy (`1.0 s` produces frames `0..29`);
+- deterministic, zero-centred 1/4/8/16-sample Hammersley patterns;
+- one station-shader injection marker, balanced assembled shader delimiters,
+  expected linear accumulation/resolve operations, bindings for every declared
+  scene/production uniform, fixed-profile UI text, and
+  absence of `MediaRecorder`, `captureStream` and `requestAnimationFrame` from
+  the dedicated production-renderer module.
+
+All changed JavaScript modules also passed `node --check`. A regex-based DOM
+contract scan found 67 unique IDs, no duplicate ID, and no missing ID among the
+47 `querySelector("#…")` references in `main.js`. `git diff --check` reported no
+whitespace errors (only the repository's existing LF-to-CRLF checkout notices).
+
+### Local HTTP resource check
+
+VS Code Live Server was already listening at `127.0.0.1:5501`. `HEAD` requests
+returned HTTP `200` for the source HTML/CSS, all five JavaScript modules, the
+scene/station/FXAA/RCAS/fullscreen shaders, both new production shaders, and the
+8,228,817-byte sky JPEG. The added SVG favicon also removes the previous
+automatic `/favicon.ico` 404 when the current HTML is used.
+
+### FFmpeg helper
+
+Command:
+
+```powershell
+$env:PYTHONDONTWRITEBYTECODE='1'
+python -B -m unittest discover -s tools\tests -v
+```
+
+Observed result: **7/7 tests passed**. This included a real three-frame
+2560 × 1440 PNG sequence, a real `libx264` encode, and FFprobe validation. The
+observed stream was H.264 High Profile, 2560 × 1440, 30/1 fps, progressive
+`yuv420p`, limited-range BT.709, exactly 3 frames and 0.1 seconds. The source
+PNGs remained present. Negative tests rejected partial manifests, wrong output
+dimensions, missing frames, wrong PNG IHDR dimensions and incompatible probe
+metadata.
+
+### Browser/GPU validation status
+
+The browser-control runtime reported no connected browser (`[]`) on 2 August
+2026. Per the browser-control safety rules, no unrelated automation backend was
+substituted. Consequently, the following required checks have **not yet been
+represented as successful** in this record:
+
+- browser WebGL2 compilation/linking of the revised scene and two production
+  shaders;
+- an actual RGBA16F 2560 × 1440 framebuffer allocation and zero-error readback;
+- recording, saving, loading and visually previewing a real interactive track;
+- an actual browser-produced 2560 × 1440 PNG or 30-frame production sequence;
+- same-frame raw-pixel hash equality after viewport/zoom changes;
+- full-resolution orientation/colour inspection and 1-sample versus 8-sample
+  edge comparison;
+- cancellation/resume and repeated-session GPU-memory checks in Chromium.
+
+The implementation must not be described as browser-validated or production-
+export validated until those checks are completed on the target Chromium/RTX
+system. The **Test first 30** UI action is the intended first acceptance run.

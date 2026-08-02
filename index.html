@@ -35,7 +35,8 @@
     />
     <meta name="theme-color" content="#03040b" />
     <title>Schwarzschild Optical Field</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css?v=20260802-production-v1" />
   </head>
   <body>
     <main class="app-shell">
@@ -171,12 +172,76 @@
             <button id="hideUiButton" class="text-button muted" type="button">Hide UI <kbd>H</kbd></button>
             <button id="recordButton" class="text-button record-button" type="button">
               <span class="record-dot" aria-hidden="true"></span>
-              <span id="recordButtonText">Record MP4</span>
+              <span id="recordButtonText">Quick recording</span>
             </button>
           </div>
           <p id="recordStatus" class="record-status" role="status" aria-live="polite">
-            Ready to record at 60 fps
+            Real-time preview recording · not production quality
           </p>
+
+          <details id="productionPanel" class="production-panel">
+            <summary>
+              <span>Production render</span>
+              <small>2560×1440 · 30 fps</small>
+            </summary>
+            <div class="production-contents">
+              <section class="production-stage" aria-labelledby="trackRecordHeading">
+                <h3 id="trackRecordHeading"><span>1</span> Camera track</h3>
+                <div class="compact-button-grid">
+                  <button id="pathRecordButton" class="text-button" type="button">Record camera path</button>
+                  <button id="pathStopButton" class="text-button muted" type="button" disabled>Stop path</button>
+                  <button id="trackSaveButton" class="text-button muted" type="button" disabled>Save JSON</button>
+                  <button id="trackLoadButton" class="text-button muted" type="button">Load JSON</button>
+                  <input id="trackFileInput" type="file" accept="application/json,.json" hidden />
+                </div>
+                <p id="trackStatus" class="production-note" role="status" aria-live="polite">No camera track loaded</p>
+              </section>
+
+              <section class="production-stage" aria-labelledby="trackPreviewHeading">
+                <h3 id="trackPreviewHeading"><span>2</span> Preview & trim</h3>
+                <label class="range-control production-range">
+                  <span>Smoothing <output id="smoothingOutput">20%</output></span>
+                  <input id="smoothingInput" type="range" min="0" max="1" step="0.05" value="0.2" />
+                </label>
+                <div class="production-fields">
+                  <label>Trim start <input id="trimStartInput" type="number" min="0" step="0.01" value="0" /></label>
+                  <label>Trim end <input id="trimEndInput" type="number" min="0" step="0.01" value="0" /></label>
+                </div>
+                <div class="compact-button-grid">
+                  <button id="trackPreviewButton" class="text-button" type="button" disabled>Preview track</button>
+                  <button id="trackPreviewStopButton" class="text-button muted" type="button" disabled>Stop preview</button>
+                  <button id="trackResetButton" class="text-button muted production-span" type="button" disabled>Reset track</button>
+                </div>
+              </section>
+
+              <section class="production-stage" aria-labelledby="offlineRenderHeading">
+                <h3 id="offlineRenderHeading"><span>3</span> PNG sequence</h3>
+                <div class="production-fixed-profile">
+                  <span>Resolution <strong>2560×1440</strong></span>
+                  <span>Frame rate <strong>30 fps</strong></span>
+                </div>
+                <div class="production-fields">
+                  <label>Samples
+                    <select id="sampleCountInput">
+                      <option value="1">1</option>
+                      <option value="4">4</option>
+                      <option value="8" selected>8</option>
+                      <option value="16">16</option>
+                    </select>
+                  </label>
+                  <label>Start frame <input id="renderStartInput" type="number" min="0" step="1" placeholder="auto" /></label>
+                </div>
+                <div class="compact-button-grid">
+                  <button id="testRenderButton" class="text-button muted" type="button" disabled>Test first 30</button>
+                  <button id="productionRenderButton" class="text-button production-primary" type="button" disabled>Render PNG sequence</button>
+                  <button id="productionCancelButton" class="text-button danger production-span" type="button" disabled>Cancel after current frame</button>
+                </div>
+                <progress id="productionProgress" value="0" max="1" aria-label="Production render progress"></progress>
+                <div id="productionProgressText" class="production-progress-text">0 / 0 frames</div>
+                <p id="productionStatus" class="production-note" role="status" aria-live="polite">Choose or record a track to begin</p>
+              </section>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -218,6 +283,6 @@
       </div>
     </main>
 
-    <script type="module" src="js/main.js"></script>
+    <script type="module" src="js/main.js?v=20260802-production-v1"></script>
   </body>
 </html>

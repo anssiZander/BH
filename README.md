@@ -32,8 +32,9 @@ The shader files and local sky texture are loaded with `fetch()`, so opening
 - Photon label: fades a translucent yellow Orbitron `PHOTON SPHERE` inscription
   in or out on the equator of the lensed photon-sphere surface; its reading
   direction automatically reverses when the camera crosses inside
-- Record MP4: captures the WebGL field at 60 fps and downloads one continuous
-  editor-friendly recording; browsers without MP4 encoding fall back to WebM
+- Quick MP4 / WebM: captures the visible WebGL canvas in real time as a
+  convenience preview. It is explicitly **not production quality**: its size,
+  cadence, codec and bitrate remain browser-dependent.
 
 The instrument panel controls RK2 integration quality, base ray step, flight
 speed, station rotation, field of view, grid brightness, shell count, exposure,
@@ -146,6 +147,85 @@ basis that is independent of the viewing direction. It eases gradually toward
 and away from its target velocity, while mouse look uses a still softer target-
 orientation response. Both use frame-rate-independent exponential responses;
 reset, focus loss, and pointer-lock transitions cancel residual motion safely.
+
+## Production camera tracks and 2K PNG export
+
+Open the compact **Production render** section for the recommended two-stage
+workflow. Production output is fixed to exactly **2560 × 1440 at 30 fps** and
+does not use the visible canvas, `requestAnimationFrame()`, `captureStream()` or
+`MediaRecorder` for its frames.
+
+1. Select **Record camera path**, fly and look around normally, then select
+   **Stop path**. The recorder stores timestamped camera position, quaternion
+   orientation, FOV, scene time and a visual-settings snapshot—not images.
+2. Optionally set trim start/end and mild smoothing, then select **Preview
+   track**. A smoothing value of zero is the exact piecewise raw path. Preview
+   and export share the same time-based Hermite/SLERP/SQUAD evaluator. Manual
+   input is disabled during preview and the original live camera is restored
+   afterward.
+3. Use **Save JSON** to keep the small track file, or **Load JSON** to validate
+   and reuse one later. Invalid versions, non-finite values, invalid settings,
+   bad quaternion data and samples inside the camera guard are rejected.
+4. Choose 1, 4, 8 or 16 same-time spatial samples per frame (8 is the default).
+   **Test first 30** makes a short sequence. **Render PNG sequence** processes
+   the full trimmed track.
+5. Choose an empty or previous output directory when Chrome/Edge asks. Frames
+   are written immediately as `frame_000000.png`, `frame_000001.png`, and so
+   on, alongside `render_manifest.json` and a fingerprint-named recovery copy
+   of the validated camera track. Nothing collects the sequence in RAM.
+
+Leaving **Start frame** empty scans a compatible directory and resumes at its
+first missing frame without overwriting completed frames. Entering a frame
+number deliberately restarts there; existing target files require confirmation.
+**Cancel after current frame** closes the current PNG and updates the manifest
+before stopping, so a partial sequence remains resumable.
+
+Resume compatibility is based on a SHA-256 fingerprint of the complete track,
+smoothing, trim, production settings, sample count and render-pipeline version.
+Existing PNGs are fully decoded and dimension-checked before they are accepted.
+Incompatible numbered frames are deleted only after an explicit confirmation.
+
+Each output frame evaluates the track at `trimStart + frameIndex / 30`.
+Rendering may run much slower than 30 frames per second, or be throttled while
+the tab is hidden, without changing the saved timeline. Monitor resolution,
+browser size, DPR, zoom, live quality and the live megapixel cap do not change
+the 2560 × 1440 framebuffer. Production uses at least the existing 896-step
+Ultra geodesic budget.
+
+For antialiasing, the renderer holds camera and scene time fixed while applying
+a deterministic, zero-centred Hammersley subpixel pattern. Samples are averaged
+incrementally in ping-pong RGBA16F targets. A separate resolve performs
+saturation, exposure/tone mapping, sRGB conversion, restrained sharpening and
+fixed spatial dithering once. It deliberately bypasses live cross-frame TAA, so
+lensed images cannot ghost through an inaccurate motion reprojection.
+
+The directory picker requires the File System Access API, so production export
+currently requires a Chromium browser such as Chrome or Edge on localhost or
+HTTPS. A raw 2560 × 1440 RGBA frame is about 14.1 MiB; lossless PNG size depends
+heavily on the view. For conservative planning, allow up to roughly **26 GiB per
+minute** of 30 fps footage, although most PNG sequences compress smaller.
+
+### Encode the PNG master
+
+Keep the lossless PNG sequence until the encoded master has been watched,
+checked and backed up. With FFmpeg and FFprobe on `PATH`, run from the project:
+
+```powershell
+py tools\encode_png_sequence.py "C:\path\to\completed-frames"
+```
+
+The helper validates the complete manifest, every sequential filename and each
+PNG's 2560 × 1440 IHDR before encoding. It produces
+`schwarzschild-production-2k30.mp4` using `libx264`, preset `slow`, CRF 12,
+H.264 High Profile, progressive `yuv420p`, BT.709 metadata and fast-start MP4,
+then verifies the result with FFprobe. It never rescales or deletes the PNGs.
+Use `--output` for another filename and `--overwrite` only when replacement is
+intentional.
+
+Known production limitations: this profile is SDR 8-bit PNG after high-precision
+accumulation; it has no audio, motion blur or 4K option; exact raw-pixel identity
+is expected on the same browser/GPU stack but is not promised across different
+graphics drivers. The camera still cannot cross the numerical horizon guard.
 
 ## Quality and performance
 

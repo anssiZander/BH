@@ -2,8 +2,24 @@ import {
   FirstPersonCamera,
   arealToIsotropic,
   isotropicToAreal,
-} from "./camera.js";
-import { SchwarzschildRenderer } from "./webgl.js";
+} from "./camera.js?v=20260802-production-v1";
+import { SchwarzschildRenderer } from "./webgl.js?v=20260802-production-v1";
+import {
+  CameraTrackRecorder,
+  PRODUCTION_RENDER_PROFILE,
+  evaluateCameraTrack,
+  normalizeTrimRange,
+  productionFrameCount,
+  productionFrameTime,
+  validateCameraTrack,
+} from "./camera-track.js?v=20260802-production-v1";
+import {
+  ProductionRenderSession,
+  inspectProductionSupport,
+} from "./production-renderer.js?v=20260802-production-v1";
+
+const APPLICATION_VERSION = "2026.08.02-production-v1";
+const MAX_PRODUCTION_FRAMES = 1_000_000;
 
 const QUALITY_PROFILES = {
   low: { maxSteps: 256, scale: 0.52, maxPixels: 750_000 },
@@ -42,6 +58,27 @@ const recordButtonText = document.querySelector("#recordButtonText");
 const recordStatus = document.querySelector("#recordStatus");
 const controlsPanel = document.querySelector(".controls-panel");
 const radialLandmarks = document.querySelectorAll("[data-areal-radius]");
+const pathRecordButton = document.querySelector("#pathRecordButton");
+const pathStopButton = document.querySelector("#pathStopButton");
+const trackSaveButton = document.querySelector("#trackSaveButton");
+const trackLoadButton = document.querySelector("#trackLoadButton");
+const trackFileInput = document.querySelector("#trackFileInput");
+const trackResetButton = document.querySelector("#trackResetButton");
+const trackPreviewButton = document.querySelector("#trackPreviewButton");
+const trackPreviewStopButton = document.querySelector("#trackPreviewStopButton");
+const smoothingInput = document.querySelector("#smoothingInput");
+const smoothingOutput = document.querySelector("#smoothingOutput");
+const trimStartInput = document.querySelector("#trimStartInput");
+const trimEndInput = document.querySelector("#trimEndInput");
+const sampleCountInput = document.querySelector("#sampleCountInput");
+const renderStartInput = document.querySelector("#renderStartInput");
+const testRenderButton = document.querySelector("#testRenderButton");
+const productionRenderButton = document.querySelector("#productionRenderButton");
+const productionCancelButton = document.querySelector("#productionCancelButton");
+const trackStatus = document.querySelector("#trackStatus");
+const productionStatus = document.querySelector("#productionStatus");
+const productionProgress = document.querySelector("#productionProgress");
+const productionProgressText = document.querySelector("#productionProgressText");
 
 const settings = {
   quality: "high",
@@ -71,6 +108,32 @@ let stepCapDetected = false;
 let lastProbeTime = 0;
 let uiHidden = false;
 let photonLabelTarget = 1;
+let contextLost = false;
+let suppressUnloadWarning = false;
+
+const cameraTrackRecorder = new CameraTrackRecorder();
+const trackState = {
+  track: null,
+  filename: "",
+  unsaved: false,
+};
+const trackLoadState = {
+  active: false,
+  token: 0,
+};
+const previewState = {
+  active: false,
+  startedAt: 0,
+  trim: null,
+  restore: null,
+  finishAfterFrame: false,
+};
+const productionState = {
+  preparing: false,
+  active: false,
+  cancelRequested: false,
+  session: null,
+};
 
 const RECORDING_FPS = 60;
 const RECORDING_TIME_STEP_SECONDS = 1 / RECORDING_FPS;
@@ -189,6 +252,7 @@ function bindControls() {
     else startRecording();
   });
   updateRecordingIdleUi();
+  bindProductionControls();
 
   document.querySelector("#collapseControls").addEventListener("click", (event) => {
     const collapsed = controlsPanel.classList.toggle("collapsed");
@@ -208,14 +272,907 @@ function bindControls() {
 
   window.addEventListener("keydown", (event) => {
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
-    if (event.code === "KeyR") resetCamera();
+    if (
+      event.code === "KeyR"
+      && !cameraTrackRecorder.active
+      && !previewState.active
+      && !productionState.active
+    ) resetCamera();
     if (event.code === "KeyH") toggleUi();
   });
 
   document.addEventListener("visibilitychange", () => {
     renderer?.invalidateHistory();
   });
-  window.addEventListener("beforeunload", releaseRecordingStream);
+  window.addEventListener("pagehide", releaseRecordingStream);
+  window.addEventListener("beforeunload", (event) => {
+    if (suppressUnloadWarning) return;
+    if (
+      productionState.active
+      || productionState.preparing
+      || cameraTrackRecorder.active
+      || previewState.active
+      || trackLoadState.active
+      || trackState.unsaved
+    ) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  });
+}
+
+const STANDARD_CONTROL_IDS = Object.freeze([
+  "qualitySelect",
+  "rayStepInput",
+  "speedInput",
+  "rotationSpeedInput",
+  "fovInput",
+  "gridInput",
+  "shellInput",
+  "exposureInput",
+  "saturationInput",
+  "lensingInput",
+  "gridVisibleInput",
+  "spheresVisibleInput",
+  "skyVisibleInput",
+  "ringsVisibleInput",
+  "photonIndicatorInput",
+  "resetButton",
+]);
+
+const PATH_LOCKED_CONTROL_IDS = STANDARD_CONTROL_IDS.filter(
+  (id) => id !== "speedInput" && id !== "fovInput",
+);
+
+function setControlIdsDisabled(ids, disabled) {
+  for (const id of ids) {
+    const element = document.querySelector(`#${id}`);
+    if (element) element.disabled = disabled;
+  }
+}
+
+function isWorkflowBusy() {
+  return (
+    cameraTrackRecorder.active
+    || previewState.active
+    || trackLoadState.active
+    || productionState.active
+    || productionState.preparing
+    || recordingState.isRecording
+    || recordingState.isFinalizing
+  );
+}
+
+function updateWorkflowUi() {
+  const pathRecording = cameraTrackRecorder.active;
+  const previewing = previewState.active;
+  const loadingTrack = trackLoadState.active;
+  const rendering = productionState.active || productionState.preparing;
+  const quickBusy = recordingState.isRecording || recordingState.isFinalizing;
+  const hasTrack = Boolean(trackState.track);
+  const otherBusy = pathRecording || previewing || loadingTrack || rendering || quickBusy;
+
+  setControlIdsDisabled(STANDARD_CONTROL_IDS, previewing || rendering);
+  if (pathRecording) setControlIdsDisabled(PATH_LOCKED_CONTROL_IDS, true);
+
+  pathRecordButton.disabled = otherBusy;
+  pathStopButton.disabled = !pathRecording;
+  trackSaveButton.disabled = !hasTrack || otherBusy;
+  trackLoadButton.disabled = otherBusy;
+  trackResetButton.disabled = !hasTrack || otherBusy;
+  trackPreviewButton.disabled = !hasTrack || otherBusy;
+  trackPreviewStopButton.disabled = !previewing;
+  smoothingInput.disabled = previewing || rendering;
+  trimStartInput.disabled = previewing || rendering;
+  trimEndInput.disabled = previewing || rendering;
+  sampleCountInput.disabled = rendering;
+  renderStartInput.disabled = rendering;
+  testRenderButton.disabled = !hasTrack || otherBusy;
+  productionRenderButton.disabled = !hasTrack || otherBusy;
+  productionCancelButton.disabled = !productionState.active || productionState.cancelRequested;
+  if (!recordingState.isRecording && !recordingState.isFinalizing) {
+    recordButton.disabled = otherBusy || !getPreferredRecordingFormat();
+  }
+}
+
+function cameraPoseSnapshot() {
+  return {
+    position: Array.from(camera.position),
+    forward: Array.from(camera.forward),
+    right: Array.from(camera.right),
+    up: Array.from(camera.up),
+  };
+}
+
+function restoreInteractiveState(snapshot) {
+  if (!snapshot || !camera) return;
+  Object.assign(settings, snapshot.settings);
+  photonLabelTarget = snapshot.photonLabelTarget ?? settings.photonLabelOpacity;
+  simulationTimeSeconds = snapshot.sceneTime;
+  camera.setPlaybackPose(
+    snapshot.camera.position,
+    snapshot.camera.forward,
+    snapshot.camera.right,
+    snapshot.camera.up,
+  );
+  camera.setInputEnabled(true);
+  renderer.setQuality(QUALITY_PROFILES[settings.quality]);
+  renderer.invalidateHistory();
+  lastFrameTime = performance.now();
+}
+
+function getTrackTrim() {
+  if (!trackState.track) throw new Error("Record or load a camera track first.");
+  return normalizeTrimRange(
+    trackState.track,
+    Number(trimStartInput.value),
+    Number(trimEndInput.value),
+  );
+}
+
+function setTrack(track, { filename = "", unsaved = false } = {}) {
+  trackState.track = validateCameraTrack(track);
+  trackState.filename = filename;
+  trackState.unsaved = unsaved;
+  trimStartInput.value = "0.00";
+  trimEndInput.value = String(trackState.track.durationSeconds);
+  renderStartInput.value = "";
+  const saveState = unsaved ? " · unsaved (a recovery copy will be written with the render)" : "";
+  trackStatus.textContent = `${filename || "Current track"} · ${trackState.track.durationSeconds.toFixed(2)} s · ${trackState.track.samples.length} samples${saveState}`;
+  productionStatus.textContent = "Track ready for preview or production rendering";
+  updateWorkflowUi();
+}
+
+function startCameraPathRecording() {
+  if (!camera || !renderer || isWorkflowBusy()) return;
+  if (trackState.unsaved && !window.confirm("Replace the current unsaved camera track?")) return;
+  try {
+    settings.photonLabelOpacity = photonLabelTarget;
+    cameraTrackRecorder.start({
+      camera,
+      fov: settings.fov,
+      sceneTime: simulationTimeSeconds,
+      settings,
+      now: performance.now(),
+    });
+    trackStatus.textContent = "Recording camera path · navigate normally";
+    productionStatus.textContent = "Camera states only; no image frames are stored";
+    updateWorkflowUi();
+  } catch (error) {
+    trackStatus.textContent = error.message;
+  }
+}
+
+function stopCameraPathRecording() {
+  if (!cameraTrackRecorder.active) return;
+  try {
+    const track = cameraTrackRecorder.stop({
+      camera,
+      fov: settings.fov,
+      sceneTime: simulationTimeSeconds,
+      now: performance.now(),
+    });
+    setTrack(track, { unsaved: true });
+  } catch (error) {
+    cameraTrackRecorder.cancel();
+    trackStatus.textContent = error.message;
+    updateWorkflowUi();
+  }
+}
+
+function saveTrackJson() {
+  if (!trackState.track) return;
+  const blob = new Blob(
+    [`${JSON.stringify(trackState.track, null, 2)}\n`],
+    { type: "application/json" },
+  );
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  const filename = trackState.filename || `schwarzschild-camera-track-${Date.now()}.json`;
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  trackState.filename = filename;
+  trackState.unsaved = false;
+  trackStatus.textContent = `Saved ${filename} · ${trackState.track.durationSeconds.toFixed(2)} s`;
+}
+
+async function loadTrackFile(file) {
+  if (trackLoadState.active) return;
+  if (trackState.unsaved && !window.confirm("Replace the current unsaved camera track?")) {
+    trackFileInput.value = "";
+    return;
+  }
+  const token = ++trackLoadState.token;
+  trackLoadState.active = true;
+  trackStatus.textContent = "Reading and validating camera-track JSON\u2026";
+  updateWorkflowUi();
+  try {
+    if (!file || file.size > 32 * 1024 * 1024) {
+      throw new Error("Choose a camera-track JSON file smaller than 32 MB.");
+    }
+    const candidate = JSON.parse(await file.text());
+    if (token !== trackLoadState.token) return;
+    setTrack(candidate, { filename: file.name, unsaved: false });
+  } catch (error) {
+    if (token === trackLoadState.token) {
+      trackStatus.textContent = `Track rejected: ${error.message}`;
+    }
+  } finally {
+    if (token === trackLoadState.token) {
+      trackLoadState.active = false;
+      trackFileInput.value = "";
+      updateWorkflowUi();
+    }
+  }
+}
+
+function isTrackPositionSafeFor(track, position) {
+  if (!track?.settings.ringsVisible) return true;
+  return stationBandEnvelope(position) > 0.018;
+}
+
+function evaluateCurrentTrack(time) {
+  return evaluateCameraTrack(trackState.track, time, {
+    smoothing: Number(smoothingInput.value),
+    isPositionSafe: (position) => isTrackPositionSafeFor(trackState.track, position),
+  });
+}
+
+function startTrackPreview() {
+  if (!trackState.track || isWorkflowBusy()) return;
+  let restore = null;
+  try {
+    const trim = getTrackTrim();
+    evaluateCurrentTrack(trim.start);
+    restore = {
+      camera: cameraPoseSnapshot(),
+      settings: { ...settings },
+      sceneTime: simulationTimeSeconds,
+      photonLabelTarget,
+    };
+    Object.assign(settings, trackState.track.settings);
+    renderer.setQuality(QUALITY_PROFILES[settings.quality]);
+    camera.setInputEnabled(false);
+    previewState.restore = restore;
+    previewState.active = true;
+    previewState.startedAt = performance.now();
+    previewState.trim = trim;
+    previewState.finishAfterFrame = false;
+    renderer.invalidateHistory();
+    trackStatus.textContent = `Preview 0.00 / ${trim.duration.toFixed(2)} s`;
+    updateWorkflowUi();
+  } catch (error) {
+    previewState.active = false;
+    previewState.startedAt = 0;
+    previewState.trim = null;
+    previewState.restore = null;
+    previewState.finishAfterFrame = false;
+    if (restore) restoreInteractiveState(restore);
+    trackStatus.textContent = `Preview unavailable: ${error.message}`;
+    updateWorkflowUi();
+  }
+}
+
+function stopTrackPreview({ completed = false } = {}) {
+  if (!previewState.active) return;
+  const restore = previewState.restore;
+  previewState.active = false;
+  previewState.startedAt = 0;
+  previewState.trim = null;
+  previewState.restore = null;
+  previewState.finishAfterFrame = false;
+  restoreInteractiveState(restore);
+  trackStatus.textContent = completed
+    ? `Preview complete · ${trackState.track.durationSeconds.toFixed(2)} s track`
+    : "Preview stopped · interactive camera restored";
+  updateWorkflowUi();
+}
+
+function updateTrackPreview(now) {
+  const elapsed = Math.max(0, (now - previewState.startedAt) / 1000);
+  const localTime = Math.min(elapsed, previewState.trim.duration);
+  const trackTime = previewState.trim.start + localTime;
+  const pose = evaluateCurrentTrack(trackTime);
+  camera.setPlaybackPose(pose.position, pose.forward, pose.right, pose.up);
+  settings.fov = pose.fov;
+  simulationTimeSeconds = pose.sceneTime;
+  trackStatus.textContent = `Preview ${localTime.toFixed(2)} / ${previewState.trim.duration.toFixed(2)} s`;
+  previewState.finishAfterFrame = elapsed >= previewState.trim.duration;
+}
+
+function resetTrack() {
+  if (trackState.unsaved && !window.confirm("Discard the unsaved camera track?")) return;
+  trackState.track = null;
+  trackState.filename = "";
+  trackState.unsaved = false;
+  trimStartInput.value = "0";
+  trimEndInput.value = "0";
+  renderStartInput.value = "";
+  trackStatus.textContent = "No camera track loaded";
+  productionStatus.textContent = "Choose or record a track to begin";
+  productionProgress.value = 0;
+  productionProgressText.textContent = "0 / 0 frames";
+  updateWorkflowUi();
+}
+
+function formatClock(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "—";
+  const rounded = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.floor((rounded % 3600) / 60);
+  const remainder = String(rounded % 60).padStart(2, "0");
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${remainder}`
+    : `${minutes}:${remainder}`;
+}
+
+async function readManifest(directory) {
+  try {
+    const handle = await directory.getFileHandle("render_manifest.json");
+    const file = await handle.getFile();
+    if (file.size > 4 * 1024 * 1024) {
+      throw new Error("render_manifest.json exceeds the 4 MiB safety limit");
+    }
+    return { manifest: JSON.parse(await file.text()), error: null };
+  } catch (error) {
+    if (error?.name === "NotFoundError") return { manifest: null, error: null };
+    return {
+      manifest: null,
+      error: new Error(`Could not read the existing render manifest: ${error.message}`),
+    };
+  }
+}
+
+async function removeEntryIfPresent(directory, filename) {
+  try {
+    await directory.removeEntry(filename);
+  } catch (error) {
+    if (error?.name !== "NotFoundError") throw error;
+  }
+}
+
+async function writeTextFile(directory, filename, text) {
+  const handle = await directory.getFileHandle(filename, { create: true });
+  const writable = await handle.createWritable();
+  try {
+    await writable.write(text);
+    await writable.close();
+  } catch (error) {
+    await writable.abort?.();
+    throw error;
+  }
+}
+
+async function writeBlobFile(directory, filename, blob) {
+  const handle = await directory.getFileHandle(filename, { create: true });
+  const writable = await handle.createWritable();
+  try {
+    await writable.write(blob);
+    await writable.close();
+  } catch (error) {
+    await writable.abort?.();
+    throw error;
+  }
+}
+
+async function listFrameFiles(directory) {
+  const frames = new Map();
+  for await (const [name, handle] of directory.entries()) {
+    if (handle.kind !== "file") continue;
+    const match = /^frame_(\d{6})\.png$/.exec(name);
+    if (!match) continue;
+    const index = Number(match[1]);
+    if (index >= 0) frames.set(index, { name, handle });
+  }
+  return frames;
+}
+
+async function validateFrameFiles(frameFiles, width, height) {
+  const validated = new Set();
+  const sortedFrames = [...frameFiles.entries()].sort(([first], [second]) => first - second);
+  for (const [index, entry] of sortedFrames) {
+    try {
+      const file = await entry.handle.getFile();
+      await assertPngDimensions(file, width, height);
+      validated.add(index);
+    } catch (error) {
+      throw new Error(`${entry.name} is not a resumable production frame: ${error.message}`);
+    }
+  }
+  return validated;
+}
+
+async function removeFrameFiles(directory, frameFiles, predicate = () => true) {
+  for (const [index, entry] of [...frameFiles]) {
+    if (!predicate(index)) continue;
+    await directory.removeEntry(entry.name);
+    frameFiles.delete(index);
+  }
+}
+
+function firstMissingFrame(indices, frameCount) {
+  for (let index = 0; index < frameCount; index += 1) {
+    if (!indices.has(index)) return index;
+  }
+  return frameCount;
+}
+
+async function assertPngDimensions(blob, width, height) {
+  const header = new Uint8Array(await blob.slice(0, 24).arrayBuffer());
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (header.length < 24 || !signature.every((value, index) => header[index] === value)) {
+    throw new Error("The encoded production frame is not a valid PNG.");
+  }
+  const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+  if (view.getUint32(16) !== width || view.getUint32(20) !== height) {
+    throw new Error("The encoded PNG does not have the required 2560×1440 dimensions.");
+  }
+  if (typeof createImageBitmap !== "function") {
+    throw new Error("This browser cannot fully decode-check production PNG files.");
+  }
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(blob);
+    if (bitmap.width !== width || bitmap.height !== height) {
+      throw new Error("The decoded PNG dimensions do not match its IHDR header.");
+    }
+  } catch (error) {
+    throw new Error(`The PNG could not be decoded completely: ${error.message}`);
+  } finally {
+    bitmap?.close();
+  }
+}
+
+async function sha256Hex(bytes) {
+  if (!globalThis.crypto?.subtle) return null;
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (value) =>
+    value.toString(16).padStart(2, "0")
+  ).join("");
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) =>
+      `${JSON.stringify(key)}:${canonicalJson(value[key])}`
+    ).join(",")}}`;
+  }
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined) throw new Error("The render contract contains an unsupported value.");
+  return encoded;
+}
+
+async function createRenderFingerprint(contract) {
+  const hash = await sha256Hex(new TextEncoder().encode(canonicalJson(contract)));
+  if (!hash) {
+    throw new Error("SHA-256 is required to create a resumable production render.");
+  }
+  return hash;
+}
+
+function manifestCompatible(manifest, profile) {
+  if (!manifest) return true;
+  return (
+    manifest.width === profile.width
+    && manifest.height === profile.height
+    && manifest.fps === profile.fps
+    && manifest.frameCount === profile.frameCount
+    && manifest.samplesPerFrame === profile.samplesPerFrame
+    && manifest.applicationVersion === profile.applicationVersion
+    && manifest.renderFingerprint === profile.renderFingerprint
+  );
+}
+
+async function beginProductionRender({ testOnly = false } = {}) {
+  if (!trackState.track || isWorkflowBusy()) return;
+  if (typeof window.showDirectoryPicker !== "function") {
+    productionStatus.textContent = "Production export requires Chrome or Edge with the File System Access API";
+    return;
+  }
+
+  productionState.preparing = true;
+  updateWorkflowUi();
+  const finishPreparation = () => {
+    productionState.preparing = false;
+    updateWorkflowUi();
+  };
+
+  let renderRequest;
+  try {
+    const track = validateCameraTrack(trackState.track);
+    const trim = normalizeTrimRange(
+      track,
+      Number(trimStartInput.value),
+      Number(trimEndInput.value),
+    );
+    const smoothing = Number(smoothingInput.value);
+    if (!Number.isFinite(smoothing) || smoothing < 0 || smoothing > 1) {
+      throw new Error("Smoothing must be between zero and one.");
+    }
+    const sourceFrameCount = productionFrameCount(trim.duration);
+    if (sourceFrameCount > MAX_PRODUCTION_FRAMES) {
+      throw new Error("The trimmed track exceeds the one-million-frame sequence limit.");
+    }
+    const samplesPerFrame = Number(sampleCountInput.value);
+    if (!PRODUCTION_RENDER_PROFILE.sampleOptions.includes(samplesPerFrame)) {
+      throw new Error("Choose 1, 4, 8, or 16 samples per frame.");
+    }
+    const support = inspectProductionSupport(renderer);
+    if (!support.supported) throw new Error(support.reason);
+    const frameCount = testOnly ? Math.min(30, sourceFrameCount) : sourceFrameCount;
+    const productionSettings = {
+      ...track.settings,
+      quality: "ultra",
+      maxSteps: QUALITY_PROFILES.ultra.maxSteps,
+    };
+    renderRequest = {
+      track,
+      trackFilename: trackState.filename || "",
+      trim,
+      smoothing,
+      sourceFrameCount,
+      frameCount,
+      samplesPerFrame,
+      productionSettings,
+    };
+  } catch (error) {
+    productionStatus.textContent = `Production render unavailable: ${error.message}`;
+    finishPreparation();
+    return;
+  }
+
+  let directory;
+  try {
+    directory = await window.showDirectoryPicker({ mode: "readwrite" });
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      productionStatus.textContent = `Could not open the output directory: ${error.message}`;
+    }
+    finishPreparation();
+    return;
+  }
+
+  const {
+    track,
+    trackFilename,
+    trim,
+    smoothing,
+    sourceFrameCount,
+    frameCount,
+    samplesPerFrame,
+    productionSettings,
+  } = renderRequest;
+  const profile = {
+    width: PRODUCTION_RENDER_PROFILE.width,
+    height: PRODUCTION_RENDER_PROFILE.height,
+    fps: PRODUCTION_RENDER_PROFILE.fps,
+    frameCount,
+    sourceFrameCount,
+    samplesPerFrame,
+    applicationVersion: APPLICATION_VERSION,
+    trimStart: trim.start,
+    trimEnd: testOnly
+      ? Math.min(trim.end, trim.start + frameCount / PRODUCTION_RENDER_PROFILE.fps)
+      : trim.end,
+  };
+  try {
+    profile.renderFingerprint = await createRenderFingerprint({
+      contractVersion: 1,
+      applicationVersion: APPLICATION_VERSION,
+      pipeline: "linear-rgba16f-hammersley-srgb-v1",
+      width: profile.width,
+      height: profile.height,
+      fps: profile.fps,
+      frameCount: profile.frameCount,
+      sourceFrameCount: profile.sourceFrameCount,
+      samplesPerFrame: profile.samplesPerFrame,
+      trimStart: profile.trimStart,
+      trimEnd: profile.trimEnd,
+      smoothing,
+      settings: productionSettings,
+      track,
+    });
+  } catch (error) {
+    productionStatus.textContent = `Could not fingerprint the render settings: ${error.message}`;
+    finishPreparation();
+    return;
+  }
+
+  let frameFiles = new Map();
+  let completedFrames = new Set();
+  let priorManifest;
+  let startFrame;
+  let forcedRestart = false;
+  try {
+    const [listedFrames, manifestResult] = await Promise.all([
+      listFrameFiles(directory),
+      readManifest(directory),
+    ]);
+    frameFiles = listedFrames;
+    priorManifest = manifestResult.manifest;
+    const hasPriorOutput = Boolean(priorManifest) || Boolean(manifestResult.error) || frameFiles.size > 0;
+    const compatibleOutput = !manifestResult.error
+      && Boolean(priorManifest)
+      && manifestCompatible(priorManifest, profile);
+    if (hasPriorOutput && !compatibleOutput) {
+      const reason = manifestResult.error ? ` (${manifestResult.error.message})` : "";
+      if (!window.confirm(`This directory contains a different or unverifiable render${reason}. Delete its numbered frames and manifest, then start this render from frame 0?`)) {
+        productionStatus.textContent = "Production render cancelled; existing files were left untouched";
+        finishPreparation();
+        return;
+      }
+      await removeFrameFiles(directory, frameFiles);
+      await removeEntryIfPresent(directory, "render_manifest.json");
+      priorManifest = null;
+      forcedRestart = true;
+    } else if (compatibleOutput) {
+      completedFrames = await validateFrameFiles(
+        frameFiles,
+        profile.width,
+        profile.height,
+      );
+      const extraIndices = [...completedFrames.keys()].filter((index) => index >= frameCount);
+      if (extraIndices.length > 0) {
+        if (!window.confirm(`This matching directory has ${extraIndices.length} numbered frame file(s) outside 0–${frameCount - 1}. Delete only those extra files?`)) {
+          productionStatus.textContent = "Production render cancelled; existing files were left untouched";
+          finishPreparation();
+          return;
+        }
+        const extras = new Set(extraIndices);
+        await removeFrameFiles(directory, frameFiles, (index) => extras.has(index));
+        for (const index of extraIndices) completedFrames.delete(index);
+      }
+    }
+
+    const explicitStart = renderStartInput.value.trim();
+    if (forcedRestart) {
+      startFrame = 0;
+      renderStartInput.value = "";
+    } else if (testOnly) {
+      startFrame = 0;
+      const collisions = [...completedFrames.keys()].filter((index) => index < frameCount);
+      if (collisions.length > 0) {
+        if (!window.confirm(`The test directory already has ${collisions.length} target frame(s). Delete and re-render them?`)) {
+          finishPreparation();
+          return;
+        }
+        const targets = new Set(collisions);
+        await removeFrameFiles(directory, frameFiles, (index) => targets.has(index));
+        for (const index of collisions) completedFrames.delete(index);
+      }
+    } else if (explicitStart === "") {
+      startFrame = firstMissingFrame(completedFrames, frameCount);
+    } else {
+      startFrame = Number(explicitStart);
+      if (!Number.isInteger(startFrame) || startFrame < 0 || startFrame >= frameCount) {
+        throw new Error(`Start frame must be an integer from 0 to ${Math.max(0, frameCount - 1)}.`);
+      }
+      const missingEarlier = [];
+      for (let index = 0; index < startFrame; index += 1) {
+        if (!completedFrames.has(index)) missingEarlier.push(index);
+      }
+      if (missingEarlier.length > 0) {
+        throw new Error(`Cannot start at frame ${startFrame}: ${missingEarlier.length} earlier frame(s) are missing. Leave Start frame empty to resume safely.`);
+      }
+      const collisions = [...completedFrames.keys()].filter(
+        (index) => index >= startFrame && index < frameCount,
+      );
+      if (collisions.length > 0) {
+        if (!window.confirm(`Starting at frame ${startFrame} will delete and re-render ${collisions.length} existing frame(s). Continue?`)) {
+          finishPreparation();
+          return;
+        }
+        const targets = new Set(collisions);
+        await removeFrameFiles(directory, frameFiles, (index) => targets.has(index));
+        for (const index of collisions) completedFrames.delete(index);
+      }
+    }
+    if (startFrame >= frameCount) {
+      if (priorManifest) {
+        priorManifest.completedFrameCount = completedFrames.size;
+        priorManifest.nextFrame = frameCount;
+        priorManifest.status = "complete";
+        priorManifest.updatedAt = new Date().toISOString();
+        await writeTextFile(directory, "render_manifest.json", `${JSON.stringify(priorManifest, null, 2)}\n`);
+      }
+      productionStatus.textContent = `All ${frameCount} production frames already exist in this directory`;
+      productionProgress.max = frameCount;
+      productionProgress.value = frameCount;
+      productionProgressText.textContent = `${frameCount} / ${frameCount} frames`;
+      finishPreparation();
+      return;
+    }
+  } catch (error) {
+    productionStatus.textContent = `Could not inspect the output directory: ${error.message}`;
+    finishPreparation();
+    return;
+  }
+
+  const restore = {
+    camera: cameraPoseSnapshot(),
+    settings: { ...settings },
+    sceneTime: simulationTimeSeconds,
+    photonLabelTarget,
+  };
+  const trackSnapshotFilename = `camera_track_${profile.renderFingerprint.slice(0, 12)}.json`;
+  const manifest = {
+    manifestVersion: 1,
+    status: "rendering",
+    application: "Schwarzschild Optical Field",
+    applicationVersion: profile.applicationVersion,
+    createdAt: priorManifest?.createdAt || new Date().toISOString(),
+    width: profile.width,
+    height: profile.height,
+    fps: profile.fps,
+    frameCount,
+    sourceFrameCount,
+    trackDuration: profile.trimEnd - profile.trimStart,
+    trimmedSourceDuration: trim.duration,
+    sourceTrackDuration: track.durationSeconds,
+    trimStart: profile.trimStart,
+    trimEnd: profile.trimEnd,
+    samplesPerFrame,
+    smoothing,
+    geodesicMaxSteps: productionSettings.maxSteps,
+    baseStep: productionSettings.baseStep,
+    exposure: productionSettings.exposure,
+    saturation: productionSettings.saturation,
+    trackId: track.id,
+    trackFilename: trackFilename || null,
+    trackSnapshotFilename,
+    renderFingerprint: profile.renderFingerprint,
+    settings: productionSettings,
+    nextFrame: startFrame,
+    completedFrameCount: completedFrames.size,
+    testRender: testOnly,
+  };
+
+  productionState.active = true;
+  finishPreparation();
+  productionState.cancelRequested = false;
+  camera.setInputEnabled(false);
+  productionProgress.max = frameCount;
+  productionProgress.value = completedFrames.size;
+  productionProgressText.textContent = `${completedFrames.size} / ${frameCount} frames`;
+  productionStatus.textContent = "Allocating fixed 2560×1440 linear render targets…";
+  updateWorkflowUi();
+
+  const renderStartedAt = performance.now();
+  let renderedThisRun = 0;
+  try {
+    await writeTextFile(directory, trackSnapshotFilename, `${JSON.stringify(track, null, 2)}\n`);
+    await writeTextFile(directory, "render_manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
+    productionState.session = await ProductionRenderSession.create(renderer);
+    for (let frameIndex = startFrame; frameIndex < frameCount; frameIndex += 1) {
+      if (productionState.cancelRequested) break;
+      if (completedFrames.has(frameIndex)) continue;
+      const outputTime = productionFrameTime(frameIndex);
+      const trackTime = trim.start + outputTime;
+      const pose = evaluateCameraTrack(track, trackTime, {
+        smoothing,
+        isPositionSafe: (position) => isTrackPositionSafeFor(track, position),
+      });
+      camera.setPlaybackPose(pose.position, pose.forward, pose.right, pose.up);
+      const frameSettings = { ...productionSettings, fov: pose.fov };
+      productionState.session.renderFrame({
+        camera,
+        settings: frameSettings,
+        timeSeconds: pose.sceneTime,
+        frameIndex,
+        samplesPerFrame,
+      });
+      if (testOnly && frameIndex === 0) {
+        const firstHash = await sha256Hex(productionState.session.copyLastPixels());
+        productionState.session.renderFrame({
+          camera,
+          settings: frameSettings,
+          timeSeconds: pose.sceneTime,
+          frameIndex,
+          samplesPerFrame,
+        });
+        const secondHash = await sha256Hex(productionState.session.copyLastPixels());
+        if (firstHash && secondHash && firstHash !== secondHash) {
+          throw new Error("The deterministic frame-zero raw-pixel check did not match.");
+        }
+        manifest.determinismCheck = firstHash
+          ? { frameIndex: 0, rawRgbaSha256: firstHash, exactMatch: true }
+          : { frameIndex: 0, exactMatch: null, reason: "Web Crypto unavailable" };
+      }
+      productionState.session.presentLastFrame();
+      const png = await productionState.session.encodeLastFramePng();
+      await assertPngDimensions(png, profile.width, profile.height);
+      const filename = `frame_${String(frameIndex).padStart(6, "0")}.png`;
+      await writeBlobFile(directory, filename, png);
+      completedFrames.add(frameIndex);
+      renderedThisRun += 1;
+      manifest.completedFrameCount = completedFrames.size;
+      manifest.nextFrame = firstMissingFrame(completedFrames, frameCount);
+      manifest.lastCompletedFrame = frameIndex;
+      manifest.updatedAt = new Date().toISOString();
+      await writeTextFile(directory, "render_manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
+
+      const elapsedSeconds = (performance.now() - renderStartedAt) / 1000;
+      const averageFrameSeconds = elapsedSeconds / renderedThisRun;
+      const remainingFrames = frameCount - completedFrames.size;
+      const etaSeconds = averageFrameSeconds * remainingFrames;
+      productionProgress.value = completedFrames.size;
+      productionProgressText.textContent = `${completedFrames.size} / ${frameCount} · ${(100 * completedFrames.size / frameCount).toFixed(1)}%`;
+      productionStatus.textContent = `Frame ${frameIndex + 1}/${frameCount} · elapsed ${formatClock(elapsedSeconds)} · ETA ${formatClock(etaSeconds)}`;
+
+      if (productionState.cancelRequested) break;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const complete = completedFrames.size >= frameCount;
+    manifest.status = complete ? "complete" : "cancelled";
+    manifest.completedFrameCount = completedFrames.size;
+    manifest.nextFrame = firstMissingFrame(completedFrames, frameCount);
+    manifest.finishedAt = new Date().toISOString();
+    await writeTextFile(directory, "render_manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
+    productionStatus.textContent = complete
+      ? `Complete · ${frameCount} lossless PNG frames written at 2560×1440`
+      : `Cancelled safely · ${completedFrames.size}/${frameCount} completed files remain resumable`;
+  } catch (error) {
+    console.error(error);
+    manifest.status = "error";
+    manifest.error = error.message;
+    manifest.updatedAt = new Date().toISOString();
+    try {
+      await writeTextFile(directory, "render_manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
+    } catch (manifestError) {
+      console.error("Could not update render manifest:", manifestError);
+    }
+    productionStatus.textContent = `Production render stopped: ${error.message}`;
+  } finally {
+    try {
+      productionState.session?.dispose();
+    } catch (cleanupError) {
+      console.error("Production renderer cleanup failed:", cleanupError);
+    }
+    productionState.session = null;
+    productionState.active = false;
+    productionState.cancelRequested = false;
+    try {
+      if (!contextLost) restoreInteractiveState(restore);
+    } catch (restoreError) {
+      console.error("Interactive renderer restoration failed:", restoreError);
+      productionStatus.textContent += ` · interactive restoration failed: ${restoreError.message}`;
+    }
+    updateWorkflowUi();
+  }
+}
+
+function bindProductionControls() {
+  smoothingInput.addEventListener("input", () => {
+    smoothingOutput.value = `${Math.round(Number(smoothingInput.value) * 100)}%`;
+  });
+  pathRecordButton.addEventListener("click", startCameraPathRecording);
+  pathStopButton.addEventListener("click", stopCameraPathRecording);
+  trackSaveButton.addEventListener("click", saveTrackJson);
+  trackLoadButton.addEventListener("click", () => {
+    trackFileInput.click();
+  });
+  trackFileInput.addEventListener("change", () => loadTrackFile(trackFileInput.files?.[0]));
+  trackResetButton.addEventListener("click", resetTrack);
+  trackPreviewButton.addEventListener("click", startTrackPreview);
+  trackPreviewStopButton.addEventListener("click", () => stopTrackPreview());
+  testRenderButton.addEventListener("click", () => beginProductionRender({ testOnly: true }));
+  productionRenderButton.addEventListener("click", () => beginProductionRender({ testOnly: false }));
+  productionCancelButton.addEventListener("click", () => {
+    productionState.cancelRequested = true;
+    productionStatus.textContent = "Cancel requested · finishing and saving the current frame…";
+    updateWorkflowUi();
+  });
+  smoothingInput.dispatchEvent(new Event("input"));
+  if (typeof window.showDirectoryPicker !== "function") {
+    productionStatus.textContent = "Production PNG export requires Chrome or Edge";
+  }
+  updateWorkflowUi();
 }
 
 function resetCamera() {
@@ -302,9 +1259,9 @@ function updateRecordingIdleUi() {
   const format = getPreferredRecordingFormat();
   recordButton.disabled = !format;
   recordButtonText.textContent =
-    format?.extension === "webm" ? "Record WebM" : "Record MP4";
+    format?.extension === "webm" ? "Quick WebM" : "Quick MP4";
   if (format) {
-    setRecordingStatus(`Ready for ${format.label} · ${RECORDING_FPS} fps`);
+    setRecordingStatus(`Real-time preview recording · not production quality · ${format.label}`);
   } else {
     setRecordingStatus("Recording is unavailable in this browser");
   }
@@ -312,6 +1269,15 @@ function updateRecordingIdleUi() {
 
 function startRecording() {
   if (recordingState.isRecording || recordingState.isFinalizing) return;
+  if (
+    cameraTrackRecorder.active
+    || previewState.active
+    || productionState.active
+    || productionState.preparing
+  ) {
+    setRecordingStatus("Stop the camera-track workflow before quick recording");
+    return;
+  }
   if (
     typeof MediaRecorder === "undefined"
     || typeof canvas.captureStream !== "function"
@@ -379,6 +1345,7 @@ function startRecording() {
     recordingState.chunks = [];
     recordingState.isFinalizing = false;
     resetRecordingUi();
+    updateWorkflowUi();
 
     if (!chunks.length) {
       setRecordingStatus("No recording data was produced");
@@ -416,6 +1383,7 @@ function startRecording() {
   recordButton.classList.add("recording");
   recordButtonText.textContent = "Stop recording";
   setRecordingStatus(`Recording ${format.label} · ${RECORDING_FPS} fps`);
+  updateWorkflowUi();
 }
 
 function stopRecording() {
@@ -425,6 +1393,7 @@ function stopRecording() {
   recordButton.disabled = true;
   recordButtonText.textContent = "Finalizing…";
   setRecordingStatus(`Finalizing ${recordingState.formatLabel}…`);
+  updateWorkflowUi();
   recordingState.recorder.stop();
 }
 
@@ -856,18 +1825,47 @@ function runPhysicsSelfCheck() {
 function animate(now) {
   const renderingDeltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
   lastFrameTime = now;
+  if (productionState.active || contextLost) {
+    requestAnimationFrame(animate);
+    return;
+  }
   const simulationDeltaSeconds = recordingState.isRecording
     ? RECORDING_TIME_STEP_SECONDS
     : renderingDeltaSeconds;
-  simulationTimeSeconds += simulationDeltaSeconds;
-  camera.update(simulationDeltaSeconds);
-  const labelBlend = 1 - Math.exp(-4.5 * simulationDeltaSeconds);
-  settings.photonLabelOpacity +=
-    (photonLabelTarget - settings.photonLabelOpacity) * labelBlend;
-  if (Math.abs(photonLabelTarget - settings.photonLabelOpacity) < 0.001) {
-    settings.photonLabelOpacity = photonLabelTarget;
+  if (previewState.active) {
+    try {
+      updateTrackPreview(now);
+    } catch (error) {
+      stopTrackPreview();
+      trackStatus.textContent = `Preview stopped: ${error.message}`;
+    }
+  } else {
+    simulationTimeSeconds += simulationDeltaSeconds;
+    camera.update(simulationDeltaSeconds);
+    const labelBlend = 1 - Math.exp(-4.5 * simulationDeltaSeconds);
+    settings.photonLabelOpacity +=
+      (photonLabelTarget - settings.photonLabelOpacity) * labelBlend;
+    if (Math.abs(photonLabelTarget - settings.photonLabelOpacity) < 0.001) {
+      settings.photonLabelOpacity = photonLabelTarget;
+    }
   }
   renderer.render(camera, settings, simulationTimeSeconds);
+  if (cameraTrackRecorder.active) {
+    try {
+      cameraTrackRecorder.sample({
+        camera,
+        fov: settings.fov,
+        sceneTime: simulationTimeSeconds,
+        now,
+      });
+      const elapsed = (now - cameraTrackRecorder.startedAt) / 1000;
+      trackStatus.textContent = `Recording camera path · ${elapsed.toFixed(2)} s · ${cameraTrackRecorder.track.samples.length} samples`;
+    } catch (error) {
+      cameraTrackRecorder.cancel();
+      trackStatus.textContent = `Camera-path recording stopped: ${error.message}`;
+      updateWorkflowUi();
+    }
+  }
   captureRecordingFrame();
 
   const instantaneousFps = 1 / Math.max(renderingDeltaSeconds, 1 / 240);
@@ -875,11 +1873,32 @@ function animate(now) {
   probeCriticalRays(now);
   updateTelemetry(now);
   updateRecordingStatus();
+  if (previewState.finishAfterFrame) stopTrackPreview({ completed: true });
   requestAnimationFrame(animate);
 }
 
 async function start() {
   bindControls();
+
+  canvas.addEventListener("webglcontextlost", (event) => {
+    event.preventDefault();
+    contextLost = true;
+    productionState.cancelRequested = true;
+    if (cameraTrackRecorder.active) cameraTrackRecorder.cancel();
+    camera?.setInputEnabled(false);
+    statusPill.classList.add("danger");
+    statusText.textContent = "WEBGL CONTEXT LOST · WAITING FOR GPU RECOVERY";
+    productionStatus.textContent = "GPU context lost; completed PNG files remain safe to resume";
+    updateWorkflowUi();
+  });
+  canvas.addEventListener("webglcontextrestored", () => {
+    suppressUnloadWarning = true;
+    productionState.active = false;
+    productionState.preparing = false;
+    previewState.active = false;
+    trackLoadState.active = false;
+    window.location.reload();
+  });
 
   try {
     renderer = await SchwarzschildRenderer.create(canvas, (message) => {

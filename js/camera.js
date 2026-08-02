@@ -58,12 +58,14 @@ export class FirstPersonCamera {
     this.sensitivity = 0.00175;
     this.keys = new Set();
     this.pointerLocked = false;
+    this.inputEnabled = true;
     this._bindEvents();
     this._updateBasis();
   }
 
   _bindEvents() {
     this.canvas.addEventListener("click", () => {
+      if (!this.inputEnabled) return;
       if (document.pointerLockElement !== this.canvas) {
         const request = this.canvas.requestPointerLock?.();
         request?.catch?.(() => {});
@@ -85,7 +87,7 @@ export class FirstPersonCamera {
     });
 
     document.addEventListener("mousemove", (event) => {
-      if (!this.pointerLocked) return;
+      if (!this.inputEnabled || !this.pointerLocked) return;
       if (!Number.isFinite(event.movementX) || !Number.isFinite(event.movementY)) return;
       this.targetYaw -= event.movementX * this.sensitivity;
       this.targetPitch -= event.movementY * this.sensitivity;
@@ -97,6 +99,7 @@ export class FirstPersonCamera {
     });
 
     window.addEventListener("keydown", (event) => {
+      if (!this.inputEnabled) return;
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) {
         return;
       }
@@ -123,6 +126,36 @@ export class FirstPersonCamera {
     this.displacement.fill(0);
     this.targetYaw = this.yaw;
     this.targetPitch = this.pitch;
+  }
+
+  setInputEnabled(enabled) {
+    this.inputEnabled = Boolean(enabled);
+    if (!this.inputEnabled && document.pointerLockElement === this.canvas) {
+      document.exitPointerLock?.();
+    }
+    this._cancelMotion();
+  }
+
+  setPlaybackPose(position, forward, right, up) {
+    if (!position || !forward || !right || !up) {
+      throw new Error("A complete playback camera pose is required.");
+    }
+    const radius = Math.hypot(position[0], position[1], position[2]);
+    if (!Number.isFinite(radius) || radius < HORIZON_GUARD) {
+      throw new Error("Playback camera pose is inside the horizon guard.");
+    }
+    this.position.set(position);
+    normalize(this.forward, forward[0], forward[1], forward[2]);
+    normalize(this.right, right[0], right[1], right[2]);
+    normalize(this.up, up[0], up[1], up[2]);
+    this.pitch = Math.asin(Math.max(-1, Math.min(1, this.forward[1])));
+    this.yaw = Math.atan2(this.forward[0], this.forward[2]);
+    this.targetYaw = this.yaw;
+    this.targetPitch = this.pitch;
+    this.keys.clear();
+    this.velocity.fill(0);
+    this.targetVelocity.fill(0);
+    this.displacement.fill(0);
   }
 
   _updateBasis() {
@@ -199,6 +232,7 @@ export class FirstPersonCamera {
   }
 
   update(deltaSeconds) {
+    if (!this.inputEnabled) return;
     const dt = Math.max(
       0,
       Math.min(
