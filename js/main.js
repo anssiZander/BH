@@ -64,6 +64,7 @@ const settings = {
 let renderer;
 let camera;
 let lastFrameTime = performance.now();
+let simulationTimeSeconds = lastFrameTime / 1000;
 let smoothedFps = 60;
 let lastTelemetryTime = 0;
 let stepCapDetected = false;
@@ -72,17 +73,20 @@ let uiHidden = false;
 let photonLabelTarget = 1;
 
 const RECORDING_FPS = 60;
+const RECORDING_TIME_STEP_SECONDS = 1 / RECORDING_FPS;
 const RECORDING_VIDEO_BITS_PER_SECOND = 16_000_000;
 const recordingState = {
   isRecording: false,
   isFinalizing: false,
   recorder: null,
   stream: null,
+  captureTrack: null,
+  manualFrameCapture: false,
   chunks: [],
   mimeType: "",
   extension: "mp4",
   formatLabel: "MP4",
-  startedAt: 0,
+  frameCount: 0,
   lastStatusSecond: -1,
 };
 
@@ -285,6 +289,8 @@ function getPreferredRecordingFormat() {
 function releaseRecordingStream() {
   recordingState.stream?.getTracks().forEach((track) => track.stop());
   recordingState.stream = null;
+  recordingState.captureTrack = null;
+  recordingState.manualFrameCapture = false;
 }
 
 function resetRecordingUi() {
@@ -320,8 +326,16 @@ function startRecording() {
     return;
   }
 
-  const stream = canvas.captureStream(RECORDING_FPS);
-  if (!stream.getVideoTracks().length) {
+  let stream = canvas.captureStream(0);
+  let captureTrack = stream.getVideoTracks()[0];
+  const manualFrameCapture =
+    typeof captureTrack?.requestFrame === "function";
+  if (!manualFrameCapture) {
+    stream.getTracks().forEach((track) => track.stop());
+    stream = canvas.captureStream(RECORDING_FPS);
+    captureTrack = stream.getVideoTracks()[0];
+  }
+  if (!captureTrack) {
     stream.getTracks().forEach((track) => track.stop());
     setRecordingStatus("The renderer did not provide a video track");
     return;
@@ -342,6 +356,8 @@ function startRecording() {
 
   recordingState.recorder = recorder;
   recordingState.stream = stream;
+  recordingState.captureTrack = captureTrack;
+  recordingState.manualFrameCapture = manualFrameCapture;
   recordingState.chunks = [];
   recordingState.mimeType = recorder.mimeType || format.mimeType;
   recordingState.extension = format.extension;
@@ -395,7 +411,7 @@ function startRecording() {
   }
 
   recordingState.isRecording = true;
-  recordingState.startedAt = performance.now();
+  recordingState.frameCount = 0;
   recordingState.lastStatusSecond = -1;
   recordButton.classList.add("recording");
   recordButtonText.textContent = "Stop recording";
@@ -412,15 +428,25 @@ function stopRecording() {
   recordingState.recorder.stop();
 }
 
-function updateRecordingStatus(now) {
+function captureRecordingFrame() {
   if (!recordingState.isRecording) return;
-  const elapsedSeconds = Math.floor((now - recordingState.startedAt) / 1000);
+  recordingState.frameCount += 1;
+  if (recordingState.manualFrameCapture) {
+    recordingState.captureTrack.requestFrame();
+  }
+}
+
+function updateRecordingStatus() {
+  if (!recordingState.isRecording) return;
+  const elapsedSeconds = Math.floor(
+    recordingState.frameCount * RECORDING_TIME_STEP_SECONDS,
+  );
   if (elapsedSeconds === recordingState.lastStatusSecond) return;
   recordingState.lastStatusSecond = elapsedSeconds;
   const minutes = Math.floor(elapsedSeconds / 60);
   const seconds = String(elapsedSeconds % 60).padStart(2, "0");
   setRecordingStatus(
-    `Recording ${recordingState.formatLabel} · ${minutes}:${seconds} · ${RECORDING_FPS} fps`,
+    `Recording ${recordingState.formatLabel} · ${minutes}:${seconds} · ${recordingState.frameCount} frames · ${RECORDING_FPS} fps`,
   );
 }
 
@@ -828,22 +854,27 @@ function runPhysicsSelfCheck() {
 }
 
 function animate(now) {
-  const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
+  const renderingDeltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
   lastFrameTime = now;
-  camera.update(deltaSeconds);
-  const labelBlend = 1 - Math.exp(-4.5 * deltaSeconds);
+  const simulationDeltaSeconds = recordingState.isRecording
+    ? RECORDING_TIME_STEP_SECONDS
+    : renderingDeltaSeconds;
+  simulationTimeSeconds += simulationDeltaSeconds;
+  camera.update(simulationDeltaSeconds);
+  const labelBlend = 1 - Math.exp(-4.5 * simulationDeltaSeconds);
   settings.photonLabelOpacity +=
     (photonLabelTarget - settings.photonLabelOpacity) * labelBlend;
   if (Math.abs(photonLabelTarget - settings.photonLabelOpacity) < 0.001) {
     settings.photonLabelOpacity = photonLabelTarget;
   }
-  renderer.render(camera, settings, now / 1000);
+  renderer.render(camera, settings, simulationTimeSeconds);
+  captureRecordingFrame();
 
-  const instantaneousFps = 1 / Math.max(deltaSeconds, 1 / 240);
+  const instantaneousFps = 1 / Math.max(renderingDeltaSeconds, 1 / 240);
   smoothedFps += (instantaneousFps - smoothedFps) * 0.035;
   probeCriticalRays(now);
   updateTelemetry(now);
-  updateRecordingStatus(now);
+  updateRecordingStatus();
   requestAnimationFrame(animate);
 }
 

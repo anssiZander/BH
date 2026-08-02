@@ -4,9 +4,12 @@ const RESET_YAW = Math.PI;
 const RESET_PITCH = -0.0996687;
 const HORIZON_GUARD = 0.535;
 const MAX_DELTA_SECONDS = 0.05;
-const LOOK_RESPONSE = 8.5;
-const MOVE_ACCELERATION_RESPONSE = 4.5;
-const MOVE_DECELERATION_RESPONSE = 7;
+// Lower values make the response softer and slower; higher values make it snappier.
+const EASING = Object.freeze({
+  camera: 18.5,
+  movement: 14.5,
+  movementStop: 7,
+});
 
 function normalize(out, x, y, z) {
   const length = Math.hypot(x, y, z) || 1;
@@ -205,7 +208,7 @@ export class FirstPersonCamera {
     );
     if (dt <= 0) return;
 
-    const lookBlend = 1 - Math.exp(-LOOK_RESPONSE * dt);
+    const lookBlend = 1 - Math.exp(-EASING.camera * dt);
     this.yaw += (this.targetYaw - this.yaw) * lookBlend;
     this.pitch += (this.targetPitch - this.pitch) * lookBlend;
     this._updateBasis();
@@ -256,8 +259,8 @@ export class FirstPersonCamera {
       ) * targetSpeed;
     const response =
       movementLength > 0
-        ? MOVE_ACCELERATION_RESPONSE
-        : MOVE_DECELERATION_RESPONSE;
+        ? EASING.movement
+        : EASING.movementStop;
     const decay = Math.exp(-response * dt);
     const integrationScale = (1 - decay) / response;
     for (let component = 0; component < 3; component += 1) {
