@@ -1,9 +1,9 @@
 const SHADER_PATHS = {
-  vertex: "shaders/fullscreen.vert?v=20260802-production-v1",
-  fragment: "shaders/schwarzschild.frag?v=20260802-production-v1",
-  orbitalStation: "shaders/orbital_station.glsl?v=20260802-production-v1",
-  fxaa: "shaders/fxaa.frag?v=20260802-production-v1",
-  rcas: "shaders/rcas.frag?v=20260802-production-v1",
+  vertex: "shaders/fullscreen.vert?v=20260804-hemispheres-v2",
+  fragment: "shaders/schwarzschild.frag?v=20260804-hemispheres-v2",
+  orbitalStation: "shaders/orbital_station.glsl?v=20260804-hemispheres-v2",
+  fxaa: "shaders/fxaa.frag?v=20260804-hemispheres-v2",
+  rcas: "shaders/rcas.frag?v=20260804-hemispheres-v2",
 };
 
 const SKY_TEXTURE_PATH = "assets/galaxy_4k.jpg";
@@ -266,13 +266,11 @@ function settingsSignature(settings) {
     settings.maxSteps,
     settings.baseStep,
     settings.fov,
-    settings.gridBrightness,
     settings.shellCount,
     settings.exposure,
     settings.saturation,
     settings.stationRotationSpeed,
     settings.lensing,
-    settings.gridVisible,
     settings.spheresVisible,
     settings.skyVisible,
     settings.ringsVisible,
@@ -416,11 +414,9 @@ export class SchwarzschildRenderer {
       "uMaxSteps",
       "uBaseStep",
       "uLensing",
-      "uGridVisible",
       "uSpheresVisible",
       "uSkyVisible",
       "uRingsVisible",
-      "uGridBrightness",
       "uShellCount",
       "uExposure",
       "uSaturation",
@@ -594,13 +590,7 @@ export class SchwarzschildRenderer {
     // Lensed images do not have a pinhole inverse motion map. Keep them
     // spatially stable instead of injecting temporal jitter that cannot be
     // reprojected correctly.
-    const jitterSafe =
-      motionValid
-      && !settings.lensing
-      && !(
-        settings.gridVisible
-        && settings.gridBrightness > 0
-      );
+    const jitterSafe = motionValid && !settings.lensing;
     const jitter = !jitterSafe
       ? ZERO_JITTER
       : TEMPORAL_JITTER[
@@ -660,11 +650,9 @@ export class SchwarzschildRenderer {
     gl.uniform1i(u.uMaxSteps, settings.maxSteps);
     gl.uniform1f(u.uBaseStep, settings.baseStep);
     gl.uniform1i(u.uLensing, settings.lensing ? 1 : 0);
-    gl.uniform1i(u.uGridVisible, settings.gridVisible ? 1 : 0);
     gl.uniform1i(u.uSpheresVisible, settings.spheresVisible ? 1 : 0);
     gl.uniform1i(u.uSkyVisible, settings.skyVisible ? 1 : 0);
     gl.uniform1i(u.uRingsVisible, settings.ringsVisible ? 1 : 0);
-    gl.uniform1f(u.uGridBrightness, settings.gridBrightness);
     gl.uniform1i(u.uShellCount, settings.shellCount);
     gl.uniform1f(u.uExposure, settings.exposure);
     gl.uniform1f(u.uSaturation, settings.saturation);

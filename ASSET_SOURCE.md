@@ -137,5 +137,19 @@ requested equal edge-to-edge gaps, an unobstructed equatorial view, and removal
 of the large white cross-lattice pipes, radial spokes, hub, mast, antenna, and
 dishes. A second precise edit moved the inner bands toward the equator while
 preserving the four-band count and symmetry. The card contains no text, logo,
-or watermark. It is used only for Open Graph and Twitter cards and is not
-sampled by the WebGL renderer.
+or watermark. It is retained as an unused legacy asset and is not sampled by
+the WebGL renderer.
+
+### `assets/social-preview-hemispheres.png`
+
+Project-owned 1731 × 909 social preview generated with OpenAI's built-in
+image-generation tool on 4 August 2026 by editing the preceding four-band card.
+The first edit preserved the centered black-hole shadow, deep star field,
+neutral panelled metal, gold edge rails, and wide composition while replacing
+the four separated bands with exactly two continuous Dyson hemispheres and one
+clear equatorial gap. It requested the highest greeble density beside the gap,
+simpler polar panels, no spherical grids, no extra gaps or bands, and no spokes,
+hub, mast, antennas, dishes, accretion disk, planet, logo, or watermark. A
+single follow-up corrected the upper-left title to the exact text
+`SCHWARZSCHILD FIELD` without changing the scene. This is the active Open Graph
+and Twitter card and is not sampled by the WebGL renderer.

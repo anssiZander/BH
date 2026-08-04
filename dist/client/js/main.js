@@ -2,8 +2,8 @@ import {
   FirstPersonCamera,
   arealToIsotropic,
   isotropicToAreal,
-} from "./camera.js?v=20260802-production-v1";
-import { SchwarzschildRenderer } from "./webgl.js?v=20260802-production-v1";
+} from "./camera.js?v=20260804-hemispheres-v2";
+import { SchwarzschildRenderer } from "./webgl.js?v=20260804-hemispheres-v2";
 import {
   CameraTrackRecorder,
   PRODUCTION_RENDER_PROFILE,
@@ -12,29 +12,56 @@ import {
   productionFrameCount,
   productionFrameTime,
   validateCameraTrack,
-} from "./camera-track.js?v=20260802-production-v1";
+} from "./camera-track.js?v=20260804-hemispheres-v2";
 import {
   ProductionRenderSession,
   inspectProductionSupport,
-} from "./production-renderer.js?v=20260802-production-v1";
+} from "./production-renderer.js?v=20260804-hemispheres-v2";
 
-const APPLICATION_VERSION = "2026.08.02-production-v1";
+const APPLICATION_VERSION = "2026.08.04-hemispheres-v2";
 const MAX_PRODUCTION_FRAMES = 1_000_000;
+const GPU_SAFE_MODE_STORAGE_KEY = "schwarzschild-gpu-safe-mode";
+
+function readGpuSafeModeRequest() {
+  try {
+    return sessionStorage.getItem(GPU_SAFE_MODE_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function requestGpuSafeMode() {
+  try {
+    sessionStorage.setItem(GPU_SAFE_MODE_STORAGE_KEY, "1");
+  } catch {
+    // The conservative live defaults still apply when storage is unavailable.
+  }
+}
+
+function clearGpuSafeModeRequest() {
+  try {
+    sessionStorage.removeItem(GPU_SAFE_MODE_STORAGE_KEY);
+  } catch {
+    // Storage is optional; no recovery behavior depends on clearing it.
+  }
+}
+
+const gpuSafeModeRequested = readGpuSafeModeRequest();
 
 const QUALITY_PROFILES = {
-  low: { maxSteps: 256, scale: 0.52, maxPixels: 750_000 },
-  medium: { maxSteps: 320, scale: 0.78, maxPixels: 1_500_000 },
-  high: { maxSteps: 416, scale: 1.0, maxPixels: 2_600_000 },
-  ultra: { maxSteps: 896, scale: 1.15, maxPixels: 4_200_000 },
+  low: { maxSteps: 192, scale: 0.45, maxPixels: 450_000 },
+  medium: { maxSteps: 288, scale: 0.64, maxPixels: 900_000 },
+  high: { maxSteps: 384, scale: 0.88, maxPixels: 1_800_000 },
+  ultra: { maxSteps: 640, scale: 1.0, maxPixels: 2_600_000 },
 };
+const PRODUCTION_MAX_STEPS = 896;
+const PHYSICS_SELF_CHECK_STEPS = 416;
 
 const CAPTURE_RHO = 0.515;
 const PHOTON_RHO = (2 + Math.sqrt(3)) / 2;
 const RADIAL_TRACK_MIN_AREAL = 2;
 const RADIAL_TRACK_MAX_AREAL = 22;
-const STATION_INNER_BAND_LATITUDE = 0.1875;
-const STATION_OUTER_BAND_LATITUDE = 0.5625;
-const STATION_ENVELOPE_HALF_ANGLE = 0.15;
+const STATION_EQUATORIAL_GAP_HALF_ANGLE = 0.125;
 const ESCAPE_RHO = 36;
 const SHELL_RADII = [
   0.93166248, 1.30901699, 1.8660254, 2.39564392,
@@ -81,18 +108,18 @@ const productionProgress = document.querySelector("#productionProgress");
 const productionProgressText = document.querySelector("#productionProgressText");
 
 const settings = {
-  quality: "high",
-  maxSteps: QUALITY_PROFILES.high.maxSteps,
+  quality: gpuSafeModeRequested ? "low" : "medium",
+  maxSteps: gpuSafeModeRequested
+    ? QUALITY_PROFILES.low.maxSteps
+    : QUALITY_PROFILES.medium.maxSteps,
   baseStep: 0.09,
   fov: 68,
-  gridBrightness: 0.8,
   shellCount: 8,
   exposure: 1.1,
   saturation: 1.18,
   stationRotationSpeed: 0.015,
   photonLabelOpacity: 1,
   lensing: true,
-  gridVisible: true,
   spheresVisible: false,
   skyVisible: true,
   ringsVisible: true,
@@ -110,6 +137,7 @@ let uiHidden = false;
 let photonLabelTarget = 1;
 let contextLost = false;
 let suppressUnloadWarning = false;
+let stableLiveFrameCount = 0;
 
 const cameraTrackRecorder = new CameraTrackRecorder();
 const trackState = {
@@ -173,6 +201,7 @@ function bindControls() {
   }
 
   const qualitySelect = document.querySelector("#qualitySelect");
+  if (gpuSafeModeRequested) qualitySelect.value = "low";
   const updateQuality = () => {
     settings.quality = qualitySelect.value;
     const profile = QUALITY_PROFILES[settings.quality];
@@ -194,7 +223,6 @@ function bindControls() {
     (value) => `${Math.round((value / 0.015) * 100)}%`,
   );
   bindRange("fovInput", "fovOutput", "fov", (value) => `${Math.round(value)}°`);
-  bindRange("gridInput", "gridOutput", "gridBrightness", (value) => value.toFixed(2));
   bindRange("shellInput", "shellOutput", "shellCount", (value) => `${Math.round(value)}`);
   bindRange("exposureInput", "exposureOutput", "exposure", (value) => value.toFixed(2));
   bindRange("saturationInput", "saturationOutput", "saturation", (value) => value.toFixed(2));
@@ -205,13 +233,6 @@ function bindControls() {
   };
   lensingInput.addEventListener("change", updateLensing);
   updateLensing();
-
-  const gridVisibleInput = document.querySelector("#gridVisibleInput");
-  const updateGridVisibility = () => {
-    settings.gridVisible = gridVisibleInput.checked;
-  };
-  gridVisibleInput.addEventListener("change", updateGridVisibility);
-  updateGridVisibility();
 
   const spheresVisibleInput = document.querySelector("#spheresVisibleInput");
   const updateSphereVisibility = () => {
@@ -307,12 +328,10 @@ const STANDARD_CONTROL_IDS = Object.freeze([
   "speedInput",
   "rotationSpeedInput",
   "fovInput",
-  "gridInput",
   "shellInput",
   "exposureInput",
   "saturationInput",
   "lensingInput",
-  "gridVisibleInput",
   "spheresVisibleInput",
   "skyVisibleInput",
   "ringsVisibleInput",
@@ -512,7 +531,7 @@ async function loadTrackFile(file) {
 
 function isTrackPositionSafeFor(track, position) {
   if (!track?.settings.ringsVisible) return true;
-  return stationBandEnvelope(position) > 0.018;
+  return stationHemisphereEnvelope(position) > 0.018;
 }
 
 function evaluateCurrentTrack(time) {
@@ -808,7 +827,7 @@ async function beginProductionRender({ testOnly = false } = {}) {
     const productionSettings = {
       ...track.settings,
       quality: "ultra",
-      maxSteps: QUALITY_PROFILES.ultra.maxSteps,
+      maxSteps: PRODUCTION_MAX_STEPS,
     };
     renderRequest = {
       track,
@@ -1446,33 +1465,24 @@ function smoothstep(edge0, edge1, value) {
   return t * t * (3 - 2 * t);
 }
 
-function stationBandEnvelope(position) {
+function stationHemisphereEnvelope(position) {
   const stationRadius = Math.hypot(...position);
-  const stationLatitude = Math.asin(
+  const foldedLatitude = Math.asin(
     Math.max(
       0,
       Math.min(1, Math.abs(position[1]) / Math.max(stationRadius, 1e-8)),
     ),
   );
-  const innerAngularEnvelope = stationRadius * Math.sin(
-    Math.abs(stationLatitude - STATION_INNER_BAND_LATITUDE)
-      - STATION_ENVELOPE_HALF_ANGLE,
-  );
-  const outerAngularEnvelope = stationRadius * Math.sin(
-    Math.abs(stationLatitude - STATION_OUTER_BAND_LATITUDE)
-      - STATION_ENVELOPE_HALF_ANGLE,
+  const gapEnvelope = stationRadius * Math.sin(
+    STATION_EQUATORIAL_GAP_HALF_ANGLE - foldedLatitude,
   );
   const radialEnvelope = Math.abs(stationRadius - PHOTON_RHO) - 0.11;
-  return Math.max(
-    radialEnvelope,
-    Math.min(innerAngularEnvelope, outerAngularEnvelope),
-  );
+  return Math.max(radialEnvelope, gapEnvelope);
 }
 
 function probeStepSize(
   position,
   baseStep,
-  gridVisible,
   spheresVisible,
   ringsVisible,
   shellCount,
@@ -1482,7 +1492,7 @@ function probeStepSize(
   const photonBlend = smoothstep(0, 0.28, Math.abs(rho - PHOTON_RHO));
   rayStep = Math.min(rayStep, 0.016 + (rayStep - 0.016) * photonBlend);
 
-  if ((gridVisible || spheresVisible) && rho > 0.64 && rho < 7.3) {
+  if (spheresVisible && rho > 0.64 && rho < 7.3) {
     for (let shell = 0; shell < Math.min(shellCount, SHELL_RADII.length); shell += 1) {
       const shellBlend = smoothstep(0, 0.28, Math.abs(rho - SHELL_RADII[shell]));
       rayStep = Math.min(rayStep, 0.075 + (rayStep - 0.075) * shellBlend);
@@ -1490,15 +1500,24 @@ function probeStepSize(
   }
 
   if (ringsVisible) {
-    const stationEnvelope = stationBandEnvelope(position);
+    const stationEnvelope = stationHemisphereEnvelope(position);
     const stationBlend = smoothstep(
       0.025,
       0.2,
       Math.max(stationEnvelope, 0),
     );
+    const foldedLatitude = Math.asin(
+      Math.max(0, Math.min(1, Math.abs(position[1]) / Math.max(rho, 1e-8))),
+    );
+    const rimCoverage = 1 - smoothstep(
+      STATION_EQUATORIAL_GAP_HALF_ANGLE,
+      0.48,
+      foldedLatitude,
+    );
+    const structureStep = 0.014 + (0.007 - 0.014) * rimCoverage;
     rayStep = Math.min(
       rayStep,
-      0.01 + (rayStep - 0.01) * stationBlend,
+      structureStep + (rayStep - structureStep) * stationBlend,
     );
   }
   return rayStep;
@@ -1526,7 +1545,6 @@ function traceProbe(
     maxSteps,
     baseStep,
     lensing = true,
-    gridVisible = true,
     spheresVisible = false,
     ringsVisible = false,
     shellCount = SHELL_RADII.length,
@@ -1577,7 +1595,6 @@ function traceProbe(
     let step = probeStepSize(
       position,
       baseStep,
-      gridVisible,
       spheresVisible,
       ringsVisible,
       shellCount,
@@ -1720,7 +1737,6 @@ function probeCriticalRays(now) {
         maxSteps: settings.maxSteps,
         baseStep: settings.baseStep,
         lensing: true,
-        gridVisible: settings.gridVisible,
         spheresVisible: settings.spheresVisible,
         ringsVisible: settings.ringsVisible,
         shellCount: settings.shellCount,
@@ -1732,10 +1748,9 @@ function probeCriticalRays(now) {
 function runPhysicsSelfCheck() {
   const far = [0, 0, 14];
   const probeOptions = {
-    maxSteps: QUALITY_PROFILES.high.maxSteps,
+    maxSteps: PHYSICS_SELF_CHECK_STEPS,
     baseStep: 0.09,
     lensing: true,
-    gridVisible: true,
     spheresVisible: false,
     ringsVisible: false,
     shellCount: SHELL_RADII.length,
@@ -1750,8 +1765,7 @@ function runPhysicsSelfCheck() {
   });
   const longProbeOptions = {
     ...probeOptions,
-    maxSteps: QUALITY_PROFILES.ultra.maxSteps,
-    gridVisible: false,
+    maxSteps: PRODUCTION_MAX_STEPS,
   };
   const localOpticalRadius = opticalIndex(14) * 14;
   const directionForImpact = (impact) => {
@@ -1850,6 +1864,13 @@ function animate(now) {
     }
   }
   renderer.render(camera, settings, simulationTimeSeconds);
+  if (gpuSafeModeRequested && stableLiveFrameCount < 180) {
+    stableLiveFrameCount += 1;
+    if (stableLiveFrameCount === 180) {
+      clearGpuSafeModeRequest();
+      statusText.textContent = "GPU SAFE MODE · STABLE";
+    }
+  }
   if (cameraTrackRecorder.active) {
     try {
       cameraTrackRecorder.sample({
@@ -1883,11 +1904,16 @@ async function start() {
   canvas.addEventListener("webglcontextlost", (event) => {
     event.preventDefault();
     contextLost = true;
+    requestGpuSafeMode();
     productionState.cancelRequested = true;
     if (cameraTrackRecorder.active) cameraTrackRecorder.cancel();
     camera?.setInputEnabled(false);
     statusPill.classList.add("danger");
-    statusText.textContent = "WEBGL CONTEXT LOST · WAITING FOR GPU RECOVERY";
+    loadingScreen.classList.add("loaded");
+    fatalError.hidden = false;
+    fatalMessage.textContent =
+      "The GPU stopped the live frame. Restarting once with the conservative real-time profile…";
+    statusText.textContent = "WEBGL CONTEXT LOST · RESTARTING SAFE MODE";
     productionStatus.textContent = "GPU context lost; completed PNG files remain safe to resume";
     updateWorkflowUi();
   });
@@ -1915,7 +1941,9 @@ async function start() {
 
     loadingDetail.textContent = `${renderer.textureSize.width}×${renderer.textureSize.height} sky loaded · optics stable`;
     setTimeout(() => loadingScreen.classList.add("loaded"), 260);
-    statusText.textContent = "SCHWARZSCHILD FIELD · STABLE";
+    statusText.textContent = gpuSafeModeRequested
+      ? "GPU SAFE MODE · WARMING UP"
+      : "SCHWARZSCHILD FIELD · STABLE";
     lastFrameTime = performance.now();
     requestAnimationFrame(animate);
   } catch (error) {

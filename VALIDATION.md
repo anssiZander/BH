@@ -1,9 +1,45 @@
 # Validation record
 
-The baseline measurements below were recorded on 28 July 2026. The
-numerical-optics section remains the baseline for the unchanged ray equation.
-The final section records the 29 July 2026 source, geometry, envelope,
-distribution, HTTP, and share-image checks for the four-band revision.
+The current two-hemisphere revision is recorded first. Older measurements are
+retained below as historical records for the unchanged ray equation and retired
+scene implementations.
+
+## Two Dyson hemispheres and retired grids (4 August 2026)
+
+- The structure envelope is the intersection of a `0.11M` radial photon-shell
+  bound and one folded angular boundary at `±0.125` radians. It is negative
+  everywhere on either hemisphere and positive only inside the single
+  equatorial opening.
+- The reset camera's straight radial path lies at `atan(1.35 / 13.5) = 0.099669`
+  radians (`5.7106°`). At the photon radius its centerline is about `0.0473M`
+  from the angular gap boundary; the `0.0175M` rim rail leaves roughly `0.0298M`
+  of geometric clearance.
+- A continuous opaque spherical hull spans both gap edges through both poles.
+  Full CityBlock SDF detail is limited to folded latitudes below `0.52` radians,
+  with micro-detail fading between `0.34` and `0.52` radians. The adaptive ray
+  step tightens from `0.014M` on the simplified hull to `0.007M` beside the
+  equatorial rim.
+- After the full hemisphere footprint caused a browser GPU reset, the live path
+  was bounded independently from production. Live rendering now skips the
+  28-step self-shadow march and four-sample SDF occlusion, uses a filtered
+  low-cost panel material, and evaluates CityBlock geometry only when projected
+  rim detail exceeds `0.55` coverage below `0.30` radians latitude. Production
+  keeps the complete geometry, layered material, occlusion, and self-shadows.
+- The default live profile is `288` steps at `0.64×` scale with a `900,000`-pixel
+  cap. A context loss requests a one-session `192`-step, `450,000`-pixel safe
+  restart and clears that request after 180 stable frames. Offline production
+  remains fixed at the full `896`-step ray budget.
+- The spherical latitude/longitude grid shader, grid uniforms, render bindings,
+  camera-track settings, controls, and labels were removed. The independent,
+  disabled-by-default shaded reference spheres remain available.
+- `node --test` passed all 17 tests, including the assembled-shader delimiter
+  check, uniform-binding contract, two-hemisphere structure contract, and
+  absence of the retired grid interface/shader surface. All four JavaScript
+  modules passed `node --check`, and `git diff --check` reported no whitespace
+  errors.
+- The active 1731 × 909 share card was inspected for exactly two continuous
+  hemispheres, one equatorial gap, a centered black-hole shadow, no spherical
+  grids or extra bands, and the exact title `SCHWARZSCHILD FIELD`.
 
 ## Recorded baseline: runtime and rendering
 

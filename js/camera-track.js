@@ -1,8 +1,8 @@
 export const CAMERA_TRACK_SCHEMA_VERSION = 1;
 export const CAMERA_TRACK_GUARD_RADIUS = 0.535;
 export const PRODUCTION_RENDER_PROFILE = Object.freeze({
-  width: 2560,
-  height: 1440,
+  width: 1440,
+  height: 2650,
   fps: 30,
   defaultSamples: 8,
   sampleOptions: Object.freeze([1, 4, 8, 16]),
@@ -18,21 +18,18 @@ const SETTING_KEYS = Object.freeze([
   "maxSteps",
   "baseStep",
   "fov",
-  "gridBrightness",
   "shellCount",
   "exposure",
   "saturation",
   "stationRotationSpeed",
   "photonLabelOpacity",
   "lensing",
-  "gridVisible",
   "spheresVisible",
   "skyVisible",
   "ringsVisible",
 ]);
 const BOOLEAN_SETTING_KEYS = new Set([
   "lensing",
-  "gridVisible",
   "spheresVisible",
   "skyVisible",
   "ringsVisible",
@@ -41,7 +38,6 @@ const NUMERIC_SETTING_RANGES = Object.freeze({
   maxSteps: [1, 896],
   baseStep: [0.0001, 10],
   fov: [1.000001, 178.999999],
-  gridBrightness: [0, 10],
   shellCount: [0, 8],
   exposure: [0.0001, 32],
   saturation: [0, 16],

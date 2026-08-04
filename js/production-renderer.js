@@ -1,9 +1,9 @@
-import { PRODUCTION_RENDER_PROFILE } from "./camera-track.js?v=20260802-production-v1";
+import { PRODUCTION_RENDER_PROFILE } from "./camera-track.js?v=20260804-hemispheres-v2";
 
 const SHADER_PATHS = Object.freeze({
-  vertex: "shaders/fullscreen.vert?v=20260802-production-v1",
-  accumulate: "shaders/production_accumulate.frag?v=20260802-production-v1",
-  resolve: "shaders/production_resolve.frag?v=20260802-production-v1",
+  vertex: "shaders/fullscreen.vert?v=20260804-hemispheres-v2",
+  accumulate: "shaders/production_accumulate.frag?v=20260804-hemispheres-v2",
+  resolve: "shaders/production_resolve.frag?v=20260804-hemispheres-v2",
 });
 
 const SAMPLE_OPTIONS = new Set(PRODUCTION_RENDER_PROFILE.sampleOptions);
@@ -422,11 +422,9 @@ export class ProductionRenderSession {
     gl.uniform1i(u.uMaxSteps, settings.maxSteps);
     gl.uniform1f(u.uBaseStep, settings.baseStep);
     gl.uniform1i(u.uLensing, settings.lensing ? 1 : 0);
-    gl.uniform1i(u.uGridVisible, settings.gridVisible ? 1 : 0);
     gl.uniform1i(u.uSpheresVisible, settings.spheresVisible ? 1 : 0);
     gl.uniform1i(u.uSkyVisible, settings.skyVisible ? 1 : 0);
     gl.uniform1i(u.uRingsVisible, settings.ringsVisible ? 1 : 0);
-    gl.uniform1f(u.uGridBrightness, settings.gridBrightness);
     gl.uniform1i(u.uShellCount, settings.shellCount);
     gl.uniform1f(u.uExposure, 1);
     gl.uniform1f(u.uSaturation, 1);

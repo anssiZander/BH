@@ -27,11 +27,9 @@ uniform bool uMotionValid;
 uniform int uMaxSteps;
 uniform float uBaseStep;
 uniform bool uLensing;
-uniform bool uGridVisible;
 uniform bool uSpheresVisible;
 uniform bool uSkyVisible;
 uniform bool uRingsVisible;
-uniform float uGridBrightness;
 uniform int uShellCount;
 uniform float uExposure;
 uniform float uSaturation;
@@ -45,9 +43,7 @@ const float TAU = 6.28318530717958647692;
 const float M = 1.0;
 const float CAPTURE_RHO = 0.515;
 const float PHOTON_RHO = 1.8660254037844386;
-const float STATION_INNER_BAND_LATITUDE = 0.1875;
-const float STATION_OUTER_BAND_LATITUDE = 0.5625;
-const float STATION_ENVELOPE_HALF_ANGLE = 0.15;
+const float STATION_EQUATORIAL_GAP_HALF_ANGLE = 0.125;
 const float CRITICAL_IMPACT = 5.196152422706632;
 const float ESCAPE_RHO = 36.0;
 const int HARD_MAX_STEPS = 896;
@@ -71,38 +67,26 @@ float saturate(float value) {
     return clamp(value, 0.0, 1.0);
 }
 
-float stationBandEnvelope(vec3 point) {
+float stationHemisphereEnvelope(vec3 point) {
     float stationRadius = length(point);
-    float stationLatitude = asin(
+    float foldedLatitude = asin(
         clamp(
             abs(point.y) / max(stationRadius, 1e-8),
             0.0,
             1.0
         )
     );
-    float innerAngularEnvelope =
+    float gapEnvelope =
         stationRadius
         * sin(
-            abs(
-                stationLatitude
-                - STATION_INNER_BAND_LATITUDE
-            )
-            - STATION_ENVELOPE_HALF_ANGLE
-        );
-    float outerAngularEnvelope =
-        stationRadius
-        * sin(
-            abs(
-                stationLatitude
-                - STATION_OUTER_BAND_LATITUDE
-            )
-            - STATION_ENVELOPE_HALF_ANGLE
+            STATION_EQUATORIAL_GAP_HALF_ANGLE
+            - foldedLatitude
         );
     float radialEnvelope =
         abs(stationRadius - PHOTON_RHO) - 0.11;
     return max(
         radialEnvelope,
-        min(innerAngularEnvelope, outerAngularEnvelope)
+        gapEnvelope
     );
 }
 
@@ -137,8 +121,8 @@ float adaptiveStep(vec3 point) {
     float photonBlend = smoothstep(0.0, 0.28, abs(rho - PHOTON_RHO));
     rayStep = min(rayStep, mix(0.016, rayStep, photonBlend));
 
-    // Only visible grid shells incur crossing refinement.
-    if ((uGridVisible || uSpheresVisible) && rho > 0.64 && rho < 7.30) {
+    // Optional shaded shells still receive exact crossing refinement.
+    if (uSpheresVisible && rho > 0.64 && rho < 7.30) {
         for (int shell = 0; shell < SHELL_COUNT; ++shell) {
             if (shell >= uShellCount) break;
             float distanceToShell = abs(rho - SHELL_RADII[shell]);
@@ -147,86 +131,36 @@ float adaptiveStep(vec3 point) {
         }
     }
 
-    // The station follows four mirrored spherical latitude bands. This
-    // conservative envelope refines all four while leaving the equatorial
-    // view corridor and the gaps between adjacent bands empty.
+    // The two hemispheres leave only the equatorial corridor open. Spend the
+    // smallest integration steps near that rim and the supported radial path;
+    // the simpler high-latitude hull can tolerate a slightly larger step.
     if (uRingsVisible) {
-        float stationEnvelope = stationBandEnvelope(point);
+        float stationEnvelope = stationHemisphereEnvelope(point);
         float stationBlend =
             smoothstep(0.025, 0.20, max(stationEnvelope, 0.0));
-        rayStep = min(rayStep, mix(0.010, rayStep, stationBlend));
+        float foldedLatitude = asin(
+            clamp(abs(point.y) / max(rho, 1e-8), 0.0, 1.0)
+        );
+        float rimCoverage = 1.0 - smoothstep(
+            STATION_EQUATORIAL_GAP_HALF_ANGLE,
+            0.48,
+            foldedLatitude
+        );
+        float structureStep = mix(0.014, 0.007, rimCoverage);
+        rayStep = min(
+            rayStep,
+            mix(structureStep, rayStep, stationBlend)
+        );
     }
     return rayStep;
-}
-
-vec2 gridPipe(vec3 point, int shellIndex) {
-    vec3 normal = normalize(point);
-    float latitude = asin(clamp(normal.y, -1.0, 1.0));
-    float longitude = atan(normal.z, normal.x);
-
-    float latitudeCells = shellIndex == 2 ? 16.0 : 12.0;
-    float longitudeCells = shellIndex == 2 ? 32.0 : 24.0;
-    float latitudeOffset =
-        fract((latitude / PI + 0.5) * latitudeCells + 0.5) - 0.5;
-    float longitudeOffset =
-        fract((longitude / TAU + 0.5) * longitudeCells + 0.5) - 0.5;
-    longitudeOffset *= max(abs(cos(latitude)), 0.14);
-
-    float signedDistance =
-        abs(latitudeOffset) < abs(longitudeOffset)
-        ? latitudeOffset
-        : longitudeOffset;
-    float width = shellIndex == 2 ? 0.023 : 0.017;
-    float normalizedDistance = abs(signedDistance) / width;
-    float coverage = 1.0 - smoothstep(1.0, 1.72, normalizedDistance);
-    float crown = sqrt(max(0.0, 1.0 - min(normalizedDistance, 1.0) * min(normalizedDistance, 1.0)));
-
-    // Dim the most crowded polar region while retaining the meridians.
-    float polarFade = smoothstep(0.01, 0.11, abs(cos(latitude)));
-    coverage *= mix(0.48, 1.0, polarFade);
-
-    // A rounded cross-section plus a world-space key light makes each line
-    // read as an emissive pipe instead of a flat screen-space stroke.
-    vec3 keyLight = normalize(vec3(-0.45, 0.78, 0.62));
-    float worldLight = 0.58 + 0.42 * max(dot(normal, keyLight), 0.0);
-    float tubeShade = (0.28 + 0.78 * crown) * worldLight;
-    tubeShade += 0.34 * pow(crown, 10.0);
-    return vec2(coverage, tubeShade);
-}
-
-void accumulateGridHit(
-    vec3 crossing,
-    int shell,
-    float coverage,
-    inout vec3 gridLight,
-    inout float gridOpacity
-) {
-    vec2 pipe = gridPipe(crossing, shell);
-    if (pipe.x <= 0.001) return;
-
-    float photonEmphasis = shell == 2 ? 1.24 : 1.0;
-    float alpha =
-        saturate(
-            pipe.x
-            * coverage
-            * 0.32
-            * photonEmphasis
-            * uGridBrightness
-        );
-    vec3 emission =
-        shellColor(shell)
-        * (0.38 + 1.30 * pipe.y)
-        * photonEmphasis;
-    gridLight += (1.0 - gridOpacity) * alpha * emission;
-    gridOpacity += (1.0 - gridOpacity) * alpha * 0.82;
 }
 
 void accumulatePhotonLabelHit(
     vec3 crossing,
     vec3 rayDirection,
     float coverage,
-    inout vec3 gridLight,
-    inout float gridOpacity
+    inout vec3 labelLight,
+    inout float labelOpacity
 ) {
     if (uPhotonLabelOpacity <= 0.001) return;
 
@@ -292,8 +226,8 @@ void accumulatePhotonLabelHit(
         staticMotionDepth = cameraDistance;
     }
     vec3 emission = vec3(1.0, 0.70, 0.055) * 1.75;
-    gridLight += (1.0 - gridOpacity) * alpha * emission;
-    gridOpacity += (1.0 - gridOpacity) * alpha * 0.58;
+    labelLight += (1.0 - labelOpacity) * alpha * emission;
+    labelOpacity += (1.0 - labelOpacity) * alpha * 0.58;
 }
 
 float surfaceGrain(vec3 point, int shell) {
@@ -452,7 +386,7 @@ bool opaqueSphereBeforeEvent(
 
 
 float stationEnvelopeDistance(vec3 point) {
-    return stationBandEnvelope(point);
+    return stationHemisphereEnvelope(point);
 }
 
 float dysonScene(vec3 point) {
@@ -502,6 +436,7 @@ void refineDysonHitAlongRay(
     bool hasInside = sceneDistance < 0.0;
 
     for (int refinementStep = 0; refinementStep < 6; ++refinementStep) {
+        if (!uProductionLinear && refinementStep >= 3) break;
         if (bestAbsoluteDistance <= hitEpsilon * 0.04) break;
 
         float candidateTravel;
@@ -598,6 +533,11 @@ float stationAmbientOcclusion(
     vec3 normal,
     float pixelFootprint
 ) {
+    // The continuous hemispheres cover far more pixels than the retired bands.
+    // Keep the multi-sample SDF occlusion for offline production, while the
+    // live path uses a stable approximation that cannot trigger a GPU timeout.
+    if (!uProductionLinear) return 0.88;
+
     float sourceOffset =
         max(
             0.0125,
@@ -642,6 +582,10 @@ float stationSunShadow(
     vec3 sunDirection,
     float pixelFootprint
 ) {
+    // Direct lighting still supplies shape in real time. The 28-step
+    // self-shadow march is reserved for production frames.
+    if (!uProductionLinear) return 1.0;
+
     float sourceEpsilon =
         clamp(
             0.18 * pixelFootprint / STATION_SCALE,
@@ -730,6 +674,79 @@ float stationPeriodicBandAA(
     );
 }
 
+vec3 stationRealtimeSurfaceMaterial(
+    uint materialId,
+    vec3 sourcePoint,
+    vec3 normal,
+    vec3 rayDirection,
+    float sourcePixelFootprint
+) {
+    vec3 coordinates = stationHemisphereTransform(sourcePoint);
+    float longitudeScale = 2.0;
+    float latitudeScale = 2.4;
+    float longitudeLines = stationPeriodicLineAA(
+        coordinates.x * longitudeScale,
+        0.045,
+        sourcePixelFootprint * longitudeScale
+    );
+    float latitudeLines = stationPeriodicLineAA(
+        coordinates.y * latitudeScale,
+        0.045,
+        sourcePixelFootprint * latitudeScale
+    );
+    float panelLines = max(longitudeLines, latitudeLines);
+    vec2 panelCell = floor(
+        coordinates.xy * vec2(longitudeScale, latitudeScale)
+    );
+    float panelVariation =
+        0.5
+        + 0.5
+        * sin(dot(panelCell, vec2(12.9898, 78.233)));
+
+    vec3 baseColor =
+        vec3(0.16, 0.18, 0.20)
+        * mix(0.72, 1.08, panelVariation);
+    if (materialId == STATION_MAT_YELLOW) {
+        baseColor = vec3(0.48, 0.31, 0.055);
+    } else if (materialId == STATION_MAT_SIDE_WINDOWS) {
+        baseColor = vec3(0.08, 0.20, 0.34);
+    } else if (materialId == STATION_MAT_WALL) {
+        baseColor = vec3(0.28, 0.34, 0.40);
+    } else if (materialId == STATION_MAT_PIPE) {
+        baseColor = vec3(0.075, 0.065, 0.055);
+    } else if (stationIsMatRgb(materialId)) {
+        baseColor = stationGetMatRgb(materialId) * (1.0 / 255.0);
+    }
+    baseColor *= mix(1.0, 0.48, panelLines);
+
+    vec3 sunDirection = normalize(vec3(0.93, 1.0, 1.0));
+    vec3 viewDirection = normalize(-rayDirection);
+    float diffuse = max(dot(normal, sunDirection), 0.0);
+    float skyFill = 0.5 + 0.5 * normal.y;
+    float fresnel = pow(
+        1.0 - max(dot(normal, viewDirection), 0.0),
+        4.0
+    );
+    float highlight = pow(
+        max(
+            dot(
+                reflect(rayDirection, normal),
+                sunDirection
+            ),
+            0.0
+        ),
+        28.0
+    );
+    vec3 lighting =
+        vec3(0.16)
+        + vec3(1.38, 1.28, 1.16) * diffuse
+        + vec3(0.08, 0.12, 0.20) * skyFill;
+    vec3 color = baseColor * lighting;
+    color += vec3(0.32, 0.38, 0.48) * fresnel * 0.28;
+    color += vec3(1.0, 0.88, 0.68) * highlight * 0.22;
+    return mix(color, vec3(0.07, 0.13, 0.20), 0.06);
+}
+
 vec3 stationSurfaceMaterial(
     uint materialId,
     vec3 worldPoint,
@@ -751,6 +768,16 @@ vec3 stationSurfaceMaterial(
     vec3 ambientDirection =
         normalize(vec3(-6500.0, -6400.0, -3400.0));
 
+    if (!uProductionLinear) {
+        return stationRealtimeSurfaceMaterial(
+            materialId,
+            sourcePoint,
+            normal,
+            rayDirection,
+            sourcePixelFootprint
+        );
+    }
+
     float specular = 0.0;
     vec3 textureColor = vec3(0.5);
     if (materialId == STATION_MAT_WALL) {
@@ -767,7 +794,7 @@ vec3 stationSurfaceMaterial(
         textureColor = vec3(0.6, 0.42, 0.05) * 0.755;
         specular = 0.1;
     } else if (materialId == STATION_MAT_SIDE_WINDOWS) {
-        vec3 cylindrical = stationBandTransform(sourcePoint);
+        vec3 cylindrical = stationHemisphereTransform(sourcePoint);
         float grid =
             max(
                 stationPeriodicLineAA(
@@ -784,7 +811,7 @@ vec3 stationSurfaceMaterial(
         textureColor = vec3(0.5, 0.7, 1.0) * grid;
         specular = 0.2;
     } else if (materialId == STATION_MAT_FLOOR) {
-        vec3 cylindrical = stationBandTransform(sourcePoint);
+        vec3 cylindrical = stationHemisphereTransform(sourcePoint);
         vec3 panelNormal;
         if (length(sourcePoint) > 7.0) {
             cylindrical.xy *= vec2(16.0, 4.0);
@@ -811,7 +838,7 @@ vec3 stationSurfaceMaterial(
             textureColor = vec3(0.4);
         }
     } else if (materialId == STATION_MAT_DOME) {
-        vec3 cylindrical = stationBandTransform(sourcePoint);
+        vec3 cylindrical = stationHemisphereTransform(sourcePoint);
         textureColor *= vec3(0.91, 0.97, 0.998) * 0.8;
         float windows =
             stationPeriodicBandAA(
@@ -1009,6 +1036,7 @@ void accumulateDysonSegment(
 
     float rayT = 0.0;
     for (int probe = 0; probe < 12; ++probe) {
+        if (!uProductionLinear && probe >= 6) break;
         if (rayT > 1.0) break;
         vec3 samplePoint = oldPosition + segment * rayT;
         float sceneDistance = dysonScene(samplePoint);
@@ -1094,6 +1122,7 @@ void traceFlatDyson(
     if (travel > travelEnd) return;
 
     for (int probe = 0; probe < 192; ++probe) {
+        if (!uProductionLinear && probe >= 96) break;
         if (travel > travelEnd) break;
         vec3 samplePoint = origin + tangent * travel;
         float sceneDistance = dysonScene(samplePoint);
@@ -1152,15 +1181,14 @@ void accumulateShellCrossings(
     vec3 oldPosition,
     vec3 newPosition,
     vec3 rayDirection,
-    inout vec3 gridLight,
-    inout float gridOpacity,
+    inout vec3 labelLight,
+    inout float labelOpacity,
     inout vec3 surfaceLight,
     inout float surfaceOpacity,
     float structureT
 ) {
-    bool gridsActive = uGridVisible && uGridBrightness > 0.0;
     bool labelActive = uPhotonLabelOpacity > 0.001;
-    if (!gridsActive && !uSpheresVisible && !labelActive) return;
+    if (!uSpheresVisible && !labelActive) return;
 
     vec3 segment = newPosition - oldPosition;
     float segmentLengthSquared = dot(segment, segment);
@@ -1187,20 +1215,6 @@ void accumulateShellCrossings(
                 vec3 crossing =
                     oldPosition + segment * clamp(firstRoot, 0.0, 1.0);
                 if (
-                    shellEnabled
-                    && gridsActive
-                    && surfaceOpacity < 0.999
-                    && firstRoot < structureT
-                ) {
-                    accumulateGridHit(
-                        crossing,
-                        shell,
-                        1.0,
-                        gridLight,
-                        gridOpacity
-                    );
-                }
-                if (
                     photonLabelShell
                     && surfaceOpacity < 0.999
                     && firstRoot < structureT
@@ -1209,8 +1223,8 @@ void accumulateShellCrossings(
                         crossing,
                         rayDirection,
                         1.0,
-                        gridLight,
-                        gridOpacity
+                        labelLight,
+                        labelOpacity
                     );
                 }
                 if (shellEnabled) {
@@ -1232,20 +1246,6 @@ void accumulateShellCrossings(
                 vec3 crossing =
                     oldPosition + segment * clamp(secondRoot, 0.0, 1.0);
                 if (
-                    shellEnabled
-                    && gridsActive
-                    && surfaceOpacity < 0.999
-                    && secondRoot < structureT
-                ) {
-                    accumulateGridHit(
-                        crossing,
-                        shell,
-                        1.0,
-                        gridLight,
-                        gridOpacity
-                    );
-                }
-                if (
                     photonLabelShell
                     && surfaceOpacity < 0.999
                     && secondRoot < structureT
@@ -1254,8 +1254,8 @@ void accumulateShellCrossings(
                         crossing,
                         rayDirection,
                         1.0,
-                        gridLight,
-                        gridOpacity
+                        labelLight,
+                        labelOpacity
                     );
                 }
                 if (shellEnabled) {
@@ -1296,20 +1296,6 @@ void accumulateShellCrossings(
             1.0 - smoothstep(0.0, pixelWorld * 1.25, missDistance);
         if (edgeCoverage <= 0.001) continue;
         if (
-            shellEnabled
-            && gridsActive
-            && surfaceOpacity < 0.999
-            && closestT < structureT
-        ) {
-            accumulateGridHit(
-                closestPoint,
-                shell,
-                edgeCoverage,
-                gridLight,
-                gridOpacity
-            );
-        }
-        if (
             photonLabelShell
             && surfaceOpacity < 0.999
             && closestT < structureT
@@ -1318,8 +1304,8 @@ void accumulateShellCrossings(
                 closestPoint,
                 rayDirection,
                 edgeCoverage,
-                gridLight,
-                gridOpacity
+                labelLight,
+                labelOpacity
             );
         }
         if (shellEnabled) {
@@ -1338,8 +1324,8 @@ void accumulateShellCrossings(
 void traceFlatScene(
     vec3 origin,
     vec3 tangent,
-    inout vec3 gridLight,
-    inout float gridOpacity,
+    inout vec3 labelLight,
+    inout float labelOpacity,
     inout vec3 surfaceLight,
     inout float surfaceOpacity,
     inout vec3 structureLight,
@@ -1373,10 +1359,9 @@ void traceFlatScene(
         structureOpacity
     );
 
-    bool gridsActive = uGridVisible && uGridBrightness > 0.0;
     bool spheresActive = uSpheresVisible;
     bool labelActive = uPhotonLabelOpacity > 0.001;
-    if (gridsActive || spheresActive || labelActive) {
+    if (spheresActive || labelActive) {
         // Outside-to-inside near hits are the correct front-to-back order.
         for (int shell = SHELL_COUNT - 1; shell >= 0; --shell) {
             bool shellEnabled = shell < uShellCount;
@@ -1393,20 +1378,6 @@ void traceFlatScene(
             if (nearDistance > 1e-5 && nearDistance < horizonDistance) {
                 vec3 crossing = origin + tangent * nearDistance;
                 if (
-                    shellEnabled
-                    && gridsActive
-                    && surfaceOpacity < 0.999
-                    && nearDistance < structureDistance
-                ) {
-                    accumulateGridHit(
-                        crossing,
-                        shell,
-                        1.0,
-                        gridLight,
-                        gridOpacity
-                    );
-                }
-                if (
                     photonLabelShell
                     && surfaceOpacity < 0.999
                     && nearDistance < structureDistance
@@ -1415,8 +1386,8 @@ void traceFlatScene(
                         crossing,
                         tangent,
                         1.0,
-                        gridLight,
-                        gridOpacity
+                        labelLight,
+                        labelOpacity
                     );
                 }
                 if (shellEnabled && spheresActive) {
@@ -1446,20 +1417,6 @@ void traceFlatScene(
             if (farDistance > 1e-5 && farDistance < horizonDistance) {
                 vec3 crossing = origin + tangent * farDistance;
                 if (
-                    shellEnabled
-                    && gridsActive
-                    && surfaceOpacity < 0.999
-                    && farDistance < structureDistance
-                ) {
-                    accumulateGridHit(
-                        crossing,
-                        shell,
-                        1.0,
-                        gridLight,
-                        gridOpacity
-                    );
-                }
-                if (
                     photonLabelShell
                     && surfaceOpacity < 0.999
                     && farDistance < structureDistance
@@ -1468,8 +1425,8 @@ void traceFlatScene(
                         crossing,
                         tangent,
                         1.0,
-                        gridLight,
-                        gridOpacity
+                        labelLight,
+                        labelOpacity
                     );
                 }
                 if (shellEnabled && spheresActive) {
@@ -1634,8 +1591,8 @@ void main() {
         + uCameraUp * jitteredScreen.y * focalScale
     );
     vec3 position = uCameraPosition;
-    vec3 gridLight = vec3(0.0);
-    float gridOpacity = 0.0;
+    vec3 labelLight = vec3(0.0);
+    float labelOpacity = 0.0;
     vec3 surfaceLight = vec3(0.0);
     float surfaceOpacity = 0.0;
     vec3 structureLight = vec3(0.0);
@@ -1648,8 +1605,8 @@ void main() {
         traceFlatScene(
             position,
             tangent,
-            gridLight,
-            gridOpacity,
+            labelLight,
+            labelOpacity,
             surfaceLight,
             surfaceOpacity,
             structureLight,
@@ -1715,8 +1672,8 @@ void main() {
                 oldPosition,
                 position,
                 tangent,
-                gridLight,
-                gridOpacity,
+                labelLight,
+                labelOpacity,
                 surfaceLight,
                 surfaceOpacity,
                 structureT
@@ -1780,8 +1737,8 @@ void main() {
     sceneColor = sceneColor * (1.0 - surfaceOpacity) + surfaceLight;
     sceneColor =
         sceneColor * (1.0 - structureOpacity) + structureLight;
-    sceneColor *= 1.0 - gridOpacity * 0.42;
-    sceneColor += gridLight;
+    sceneColor *= 1.0 - labelOpacity * 0.42;
+    sceneColor += labelLight;
     sceneColor = max(sceneColor, vec3(0.0));
     if (uProductionLinear) {
         if (any(isnan(sceneColor)) || any(isinf(sceneColor))) {
@@ -1835,7 +1792,7 @@ void main() {
     if (
         uMotionValid
         && !uLensing
-        && gridOpacity < 0.001
+        && labelOpacity < 0.001
     ) {
         vec2 previousUv;
         bool validPreviousUv = false;
@@ -1866,7 +1823,7 @@ void main() {
                 );
         } else if (
             surfaceOpacity < 0.001
-            && gridOpacity < 0.001
+            && labelOpacity < 0.001
             && !captured
             && !invalidRay
         ) {

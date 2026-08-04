@@ -25,6 +25,53 @@ test("runtime shader assembly retains one station injection marker", () => {
   assert.match(assembled, /if \(uProductionLinear\)/);
 });
 
+test("Dyson geometry is two continuous hemispheres with one equatorial gap", () => {
+  const scene = read("shaders/schwarzschild.frag");
+  const station = read("shaders/orbital_station.glsl");
+  const html = read("index.html");
+  assert.match(scene, /STATION_EQUATORIAL_GAP_HALF_ANGLE = 0\.125/);
+  assert.match(scene, /stationHemisphereEnvelope/);
+  assert.match(station, /STATION_HEMISPHERE_PHASES\[2\]/);
+  assert.match(station, /continuous opaque hull/);
+  assert.match(station, /STATION_DETAIL_LATITUDE_LIMIT/);
+  assert.doesNotMatch(station, /STATION_BAND_PHASES|stationBandTransform/);
+  assert.match(html, /Dyson hemispheres/);
+
+  const photonRadius = (2 + Math.sqrt(3)) / 2;
+  const resetTrajectoryLatitude = Math.atan2(1.35, 13.5);
+  const boundaryClearance = photonRadius * Math.sin(
+    0.125 - resetTrajectoryLatitude,
+  );
+  const rimRadius = 0.075 * photonRadius / 8;
+  assert.ok(boundaryClearance - rimRadius > 0.018);
+});
+
+test("retired spherical grids have no shader or interface surface", () => {
+  const scene = read("shaders/schwarzschild.frag");
+  const html = read("index.html");
+  const main = read("js/main.js");
+  const webgl = read("js/webgl.js");
+  for (const source of [scene, html, main, webgl]) {
+    assert.doesNotMatch(source, /uGridVisible|uGridBrightness|gridVisibleInput|gridInput/);
+  }
+  assert.doesNotMatch(scene, /gridPipe|accumulateGridHit/);
+});
+
+test("live hemispheres use a bounded GPU path while production stays full fidelity", () => {
+  const scene = read("shaders/schwarzschild.frag");
+  const station = read("shaders/orbital_station.glsl");
+  const main = read("js/main.js");
+  const html = read("index.html");
+  assert.match(scene, /if \(!uProductionLinear\) return 0\.88/);
+  assert.match(scene, /if \(!uProductionLinear\) return 1\.0/);
+  assert.match(scene, /stationRealtimeSurfaceMaterial/);
+  assert.match(station, /uProductionLinear \|\| liveRimDetail/);
+  assert.match(main, /const PRODUCTION_MAX_STEPS = 896/);
+  assert.match(main, /medium: \{ maxSteps: 288, scale: 0\.64, maxPixels: 900_000 \}/);
+  assert.match(main, /GPU_SAFE_MODE_STORAGE_KEY/);
+  assert.match(html, /<option value="medium" selected>Medium<\/option>/);
+});
+
 test("production shaders are high precision WebGL2 linear passes", () => {
   const accumulate = read("shaders/production_accumulate.frag");
   const resolve = read("shaders/production_resolve.frag");

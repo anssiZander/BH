@@ -3,24 +3,26 @@
  * by morimea, based on WlKXzm, "Orbital Megastructure" by Otavio Good.
  *
  * This file preserves the source ring hull and procedural material helpers,
- * then folds two band copies over each hemisphere's spherical latitude and
- * mirrors them across the equator. The source cross-lattice, hub, radial
- * spokes, communications mast, and dishes are intentionally omitted from the
- * rendered scene along with camera state, Earth/environment rendering, TAA,
- * FSR, post-processing, and otherwise dead geometry.
+ * then wraps the detailed geometry around the equatorial rims of two solid
+ * hemispheres. The polar regions use a simpler panelled hull because the
+ * supported camera path is the straight radial fall through the equatorial
+ * opening. The source cross-lattice, hub, radial spokes, communications mast,
+ * and dishes are intentionally omitted from the rendered scene along with
+ * camera state, Earth/environment rendering, TAA, FSR, post-processing, and
+ * otherwise dead geometry.
  *
- * Inclusion contract: PI, PHOTON_RHO, STATION_INNER_BAND_LATITUDE,
- * STATION_OUTER_BAND_LATITUDE, uTime, uStationRotationSpeed,
- * uCameraPosition, uResolution, uFovY, and saturate(float) are defined first.
+ * Inclusion contract: PI, PHOTON_RHO, STATION_EQUATORIAL_GAP_HALF_ANGLE,
+ * uTime, uStationRotationSpeed, uCameraPosition, uResolution, uFovY,
+ * uProductionLinear, and saturate(float) are defined first.
  */
 
 const float STATION_SCALE = PHOTON_RHO / 8.0;
-const float STATION_BAND_HALF_ARC = 1.0;
-const float STATION_BAND_PHASES[4] = float[](
+const float STATION_SOURCE_RADIUS = 8.0;
+const float STATION_HULL_HALF_THICKNESS = 0.125;
+const float STATION_DETAIL_LATITUDE_LIMIT = 0.52;
+const float STATION_HEMISPHERE_PHASES[2] = float[](
     1.731,
-    14.487,
-    27.926,
-    38.204
+    27.926
 );
 
 const uint STATION_MAT_FLOOR = 1u;
@@ -110,7 +112,20 @@ float stationMicroDetailCoverage(vec3 unrotatedSourcePoint) {
         STATION_SCALE * 0.125;
     float cityCellPixels =
         cityCellWorldSize / worldPixelFootprint;
-    return smoothstep(4.0, 12.0, cityCellPixels);
+    float cameraCoverage = smoothstep(4.0, 12.0, cityCellPixels);
+    float sourceRadius = max(length(unrotatedSourcePoint), 1e-8);
+    float foldedLatitude = asin(
+        clamp(
+            abs(unrotatedSourcePoint.y) / sourceRadius,
+            0.0,
+            1.0
+        )
+    );
+    // Preserve the finest greebles beside the supported radial infall. Detail
+    // fades before the simplified high-latitude hull begins.
+    float trajectoryCoverage =
+        1.0 - smoothstep(0.34, STATION_DETAIL_LATITUDE_LIMIT, foldedLatitude);
+    return cameraCoverage * trajectoryCoverage;
 }
 
 uint stationSmallHashA(in uint seed) {
@@ -506,7 +521,17 @@ float stationTruss(
     );
 }
 
-vec3 stationBandTransform(vec3 point) {
+float stationHemisphereGapDistance(vec3 point) {
+    float sphereRadius = max(length(point), 1e-8);
+    float foldedLatitude = asin(
+        clamp(abs(point.y) / sphereRadius, 0.0, 1.0)
+    );
+    return sphereRadius * sin(
+        STATION_EQUATORIAL_GAP_HALF_ANGLE - foldedLatitude
+    );
+}
+
+vec3 stationHemisphereTransform(vec3 point) {
     float sphereRadius = max(length(point), 1e-8);
     float equatorialRadius = length(point.xz);
     float longitude =
@@ -517,22 +542,16 @@ vec3 stationBandTransform(vec3 point) {
         clamp(point.y / sphereRadius, -1.0, 1.0)
     );
     float foldedLatitude = abs(latitude);
-    float innerBandOffset =
-        foldedLatitude - STATION_INNER_BAND_LATITUDE;
-    float outerBandOffset =
-        foldedLatitude - STATION_OUTER_BAND_LATITUDE;
-    bool outerBand =
-        abs(outerBandOffset) < abs(innerBandOffset);
-    float nearestBandOffset =
-        outerBand ? outerBandOffset : innerBandOffset;
-    // Stratify the four deterministic pseudo-random phases around the full
-    // 52-unit circumference. Each copy samples a distant city-cell sequence
-    // instead of merely nudging the same longitudinal pattern.
-    int bandIndex = (outerBand ? 2 : 0) + (latitude < 0.0 ? 1 : 0);
-    float bandPhase = STATION_BAND_PHASES[bandIndex];
+    int hemisphereIndex = latitude < 0.0 ? 1 : 0;
+    float hemispherePhase =
+        STATION_HEMISPHERE_PHASES[hemisphereIndex];
     return vec3(
-        26.0 * (longitude / PI) + bandPhase,
-        sphereRadius * nearestBandOffset,
+        26.0 * (longitude / PI) + hemispherePhase,
+        sphereRadius
+            * (
+                foldedLatitude
+                - STATION_EQUATORIAL_GAP_HALF_ANGLE
+            ),
         sphereRadius
     );
 }
@@ -940,8 +959,13 @@ void stationDistanceToObjectSource(
     point = stationRotatingSourcePoint(point);
 
     float density = 8.0;
-    vec3 bandCoordinates = stationBandTransform(point);
-    vec3 cylindrical = bandCoordinates;
+    float sphereRadius = max(length(point), 1e-8);
+    float foldedLatitude = asin(
+        clamp(abs(point.y) / sphereRadius, 0.0, 1.0)
+    );
+    float gapDistance = stationHemisphereGapDistance(point);
+    vec3 hemisphereCoordinates = stationHemisphereTransform(point);
+    vec3 cylindrical = hemisphereCoordinates;
     cylindrical.x *= density;
 
     const float scale = 1.0;
@@ -951,58 +975,80 @@ void stationDistanceToObjectSource(
     cylindrical.y -= 8.0 * density;
     cylindrical.y = abs(cylindrical.y) - 1.0;
 
-    vec3 repeated = cylindrical;
-    repeated.xz = fract(cylindrical.xz);
-    float temporaryDistance;
-    uint temporaryMaterial;
-    stationCityBlock(
-        repeated,
-        ivec2(floor(cylindrical.xz)),
-        microDetailCoverage,
-        temporaryDistance,
-        temporaryMaterial
-    );
-    temporaryDistance *= scaleDenominator;
-    distanceValue = -100000000.0;
+    distanceValue = 100000000.0;
     material = 0u;
-    stationMatMax(
-        distanceValue,
-        material,
-        temporaryDistance,
-        temporaryMaterial
-    );
 
-    stationMatMax(
-        distanceValue,
-        material,
-        abs(bandCoordinates.y) - STATION_BAND_HALF_ARC,
-        STATION_MAT_SIDE_WINDOWS
-    );
+    // Production always retains the full low-latitude CityBlock field. Live
+    // rendering activates it only once the rim is close enough to resolve and
+    // only in the trajectory-facing latitude band; distant live views use the
+    // inexpensive continuous hull below.
+    bool liveRimDetail =
+        microDetailCoverage > 0.55
+        && foldedLatitude < 0.30;
+    if (
+        foldedLatitude < STATION_DETAIL_LATITUDE_LIMIT + 0.04
+        && (uProductionLinear || liveRimDetail)
+    ) {
+        vec3 repeated = cylindrical;
+        repeated.xz = fract(cylindrical.xz);
+        float temporaryDistance;
+        uint temporaryMaterial;
+        stationCityBlock(
+            repeated,
+            ivec2(floor(cylindrical.xz)),
+            microDetailCoverage,
+            temporaryDistance,
+            temporaryMaterial
+        );
+        temporaryDistance *= scaleDenominator;
+        float detailLimitDistance = sphereRadius * sin(
+            foldedLatitude - STATION_DETAIL_LATITUDE_LIMIT
+        );
+        stationMatMax(
+            temporaryDistance,
+            temporaryMaterial,
+            max(gapDistance, detailLimitDistance),
+            STATION_MAT_SIDE_WINDOWS
+        );
+        stationMatMin(
+            distanceValue,
+            material,
+            temporaryDistance,
+            temporaryMaterial
+        );
+    }
 
-    float ringRadius = 0.05;
-    float geometryDistance =
-        length(abs(cylindrical.xy) + vec2(-8.0, 0.0))
-        - ringRadius;
-    geometryDistance *= scaleDenominator;
+    // A continuous opaque hull guarantees that the equatorial opening is the
+    // only uncovered part of the Dyson shell. Its panel material retains
+    // filtered surface detail without carrying the full city SDF to the poles.
+    float hullDistance = max(
+        abs(sphereRadius - STATION_SOURCE_RADIUS)
+            - STATION_HULL_HALF_THICKNESS,
+        gapDistance
+    );
     stationMatMin(
         distanceValue,
         material,
-        geometryDistance,
+        hullDistance,
+        STATION_MAT_FLOOR
+    );
+
+    // A dedicated rim rail gives the closest structure on the infall path a
+    // clean silhouette even when the procedural city cells change phase.
+    float rimDistance =
+        length(
+            vec2(
+                sphereRadius - STATION_SOURCE_RADIUS,
+                hemisphereCoordinates.y
+            )
+        ) - 0.075;
+    stationMatMin(
+        distanceValue,
+        material,
+        rimDistance,
         STATION_MAT_YELLOW
     );
 
-    geometryDistance =
-        length(
-            vec2(abs(cylindrical.x), cylindrical.y)
-            + vec2(-8.0, 1.0)
-        ) - ringRadius;
-    geometryDistance *= scaleDenominator;
-    stationMatMin(
-        distanceValue,
-        material,
-        geometryDistance,
-        STATION_MAT_SPOKE
-    );
 }
 
 void stationScene(

@@ -2,9 +2,10 @@
 
 A framework-free, real-time WebGL2 visualization of light propagation around a
 nonrotating Schwarzschild black hole. The scene contains no accretion disk:
-everything visible is the lensed sky, shaded spherical reference skins,
-spherical coordinate grids, or four optional ray-marched orbital-station bands
-curved around the photon sphere.
+everything visible is the lensed sky, shaded spherical reference skins, or two
+optional ray-marched Dyson hemispheres wrapped around the photon sphere. The
+hemispheres leave one narrow equatorial corridor open for the reset camera's
+straight radial infall.
 
 ## Run it
 
@@ -27,7 +28,7 @@ The shader files and local sky texture are loaded with `fetch()`, so opening
 - R: reset the camera
 - H: hide or restore the interface
 - Escape: release pointer lock
-- Station rotation: continuously adjusts the four bands from stopped to the
+- Dyson rotation: continuously adjusts both hemispheres from stopped to the
   original `0.015`-radian-per-second speed
 - Photon label: fades a translucent yellow Orbitron `PHOTON SPHERE` inscription
   in or out on the equator of the lensed photon-sphere surface; its reading
@@ -37,11 +38,10 @@ The shader files and local sky texture are loaded with `fetch()`, so opening
   cadence, codec and bitrate remain browser-dependent.
 
 The instrument panel controls RK2 integration quality, base ray step, flight
-speed, station rotation, field of view, grid brightness, shell count, exposure,
-saturation, and
-the internal render resolution. Lensing, shaded spheres, spherical grids, the
-sky sphere, and the orbital-station structure can each be disabled
-independently. The station control is labeled `Station bands` in the interface.
+speed, Dyson rotation, field of view, reference-sphere count, exposure,
+saturation, and the internal render resolution. Lensing, shaded reference
+spheres, the sky sphere, and the Dyson structure can each be disabled
+independently. The structure control is labeled `Dyson hemispheres` in the interface.
 Sphere skins start disabled so the enclosed station is visible on first load.
 
 ## What the radii mean
@@ -49,7 +49,7 @@ Sphere skins start disabled so the enclosed station is visible on first load.
 The mass is set to `M = 1` with `G = c = 1`. The event horizon is at the
 Schwarzschild areal radius `r = 2M`; rays reaching a small numerical margin
 outside its isotropic-coordinate radius `ρ = M/2` are captured and returned
-black. The highlighted yellow grid and orbital-station bands share the
+black. The photon label and Dyson hemispheres share the
 photon-sphere radius `r = 3M`, or `ρ = (2 + √3)M/2`. It is not the horizon.
 
 The apparent black shape is the captured-ray region, commonly called the black
@@ -59,7 +59,7 @@ physical horizon. The flight camera is deliberately clamped just outside
 `ρ = M/2`, so this visualization does not currently allow travel through the
 horizon.
 
-The other grid shells are placed at areal radii
+The optional reference-sphere skins are placed at areal radii
 `r/M = 2.2, 2.5, 3.5, 4, 5, 6.5, 8`, with the photon sphere inserted at `3M`.
 
 ## Numerical method
@@ -74,54 +74,44 @@ n(ρ) = (1 + M/(2ρ))³ / (1 - M/(2ρ))
 Each pixel launches a three-dimensional ray from the camera and integrates its
 position and normalized tangent with a midpoint/RK2 step. The projected
 gradient of `ln(n)` curves the ray. Step length shrinks near the horizon,
-photon sphere, and shell crossings, then grows in the far field. A hard quality
+photon sphere, optional sphere crossings, and the Dyson hull, then grows in the far field. A hard quality
 budget prevents near-critical rays from stalling the GPU.
-
-Grid lines are evaluated only where an integrated ray crosses a shell.
-Crossings are solved against each local RK2 ray segment, including both roots
-when a near-tangent segment enters and exits the same sphere. A one-pixel
-coverage fringe smooths exact silhouettes, so sphere and grid edges do not form
-staircase gaps while all distortion still comes from the integrated optical
-paths.
-
-The grid pipes use a deliberately limited radial palette: magenta inside the
-photon sphere, yellow at the photon sphere, and cyan outside it. Their rounded
-cross-section is shaded in world space so the lines read as luminous 3D tubes
-rather than flat screen-space strokes.
 
 The optional sphere skins share those radii and colors. Procedural brushed
 grain, shallow relief, key and fill lights, restrained highlights, and stronger
 silhouette shading establish surface direction and depth. Both the inner and
-outer faces are fully opaque. The `Spheres` and `Grids` switches are independent;
-switching `Spheres` off restores the unfilled grid view.
+outer faces are fully opaque. The `Spheres` switch is independent of the Dyson
+structure and starts disabled.
 
-Four opaque procedural station bands curve along the photon sphere at areal
+Two opaque procedural Dyson hemispheres curve along the photon sphere at areal
 radius `r = 3M`, corresponding to isotropic radius `ρ/M = 1.86602540`. Their
 fragment-shader scene adapts the ring map from morimea's CC0
 [*\[TAA\] Orbital Megastructure*](https://www.shadertoy.com/view/X33BRn).
 The source radius `8` is scaled by `ρphoton / 8`. A folded spherical-latitude
-mapping creates exact mirrored copies centered at `±0.1875` and `±0.5625`
-radians (`±10.74°` and `±32.23°`), each spanning about `14.32°`. The clear
-equatorial corridor and both gaps between adjacent bands are each about
-`7.16°` wide. All four bands rotate together about their shared polar axis at
+mapping leaves only the interval `±0.125` radians around the equator uncovered,
+for a total opening of about `14.32°`. This includes the reset camera's radial
+trajectory at `5.71°` with a narrow geometric clearance from the detailed rim.
+Both hemispheres rotate together about their shared polar axis at
 `0.015` radians per second, completing one revolution in about 7 minutes. The
 distance-field geometry and all procedural panel, window, and surface-noise
 coordinates use the same rotating object-space transform.
 
 The adaptation retains the source CityBlock hull relief, dense procedural panel
-material, band-edge rails, material IDs, noise, finite-difference normals,
+material, equatorial rim rails, material IDs, noise, finite-difference normals,
 ambient occlusion, and directional shadowing. Surface hits are refined before
 shading, normal and shadow tolerances follow the projected pixel footprint, and
 sub-pixel CityBlock pipes and roof details fade into the macro hull instead of
 alternating between hit and miss from frame to frame. The protruding
-cross-lattice pipes, four center-facing spokes, central hub, ladder struts,
+cross-lattice pipes, center-facing spokes, central hub, ladder struts,
 communications mast, and repeated dishes are omitted. Camera, Earth,
 temporal-antialiasing, and post-processing code from the Shadertoy are not
 copied; the Schwarzschild camera, lensed sky, and tone mapper remain in control.
 The original project's rendering strategy informed the independently
-implemented anti-aliasing pipeline described below. The `Station bands` switch
-disables all four bands independently of spheres and grids. Because sphere
-skins are opaque, an enabled skin naturally occludes station geometry behind
+implemented anti-aliasing pipeline described below. Fine CityBlock geometry is
+restricted to the low-latitude region closest to the supported infall, while a
+continuous filtered panel hull covers each hemisphere through its pole. The
+`Dyson hemispheres` switch disables both halves independently of sphere skins.
+Because sphere skins are opaque, an enabled skin naturally occludes station geometry behind
 it; disable `Spheres` to inspect the complete structure.
 
 The live areal-radius tracker uses a logarithmic `2M`–`22M` scale. Its horizon
@@ -229,14 +219,19 @@ graphics drivers. The camera still cannot cross the numerical horizon guard.
 
 ## Quality and performance
 
-`High` is the default and uses 416 RK2 steps at native device resolution up to
-its 2.6-megapixel safety cap.
-It targets smooth real-time interaction at 1080p on an RTX 4070-class GPU.
-`Low` and `Medium` reduce both ray budget and pixel count. `Ultra` raises the
-budget to 896 steps and a 115% internal render scale; it is intended for
-screenshots or powerful GPUs. Critical rays that still exhaust the budget are
-darkened gracefully, and the status display reports when sampled view rays hit
-the cap.
+`Medium` is the default live profile and uses 288 RK2 steps at a 64% internal
+scale with a 0.9-megapixel safety cap. `Low` provides a 192-step, 0.45-scale
+recovery profile; `High` uses 384 steps up to 1.8 megapixels; and live `Ultra`
+uses 640 steps up to 2.6 megapixels. The live hemisphere shader uses filtered
+panel shading, analytic ambient fill, and direct lighting; full CityBlock SDF
+detail activates only close to the equatorial trajectory.
+
+Production rendering remains separate: it always uses the 896-step ray budget,
+full low-latitude CityBlock geometry, multi-sample ambient occlusion, ray-marched
+self-shadows, layered panels, and the selected 1/4/8/16 spatial samples. Browser
+size and the live quality setting do not reduce production fidelity. Critical
+rays that still exhaust a budget are darkened gracefully, and the status display
+reports when sampled view rays hit the cap.
 
 ## Approximations
 
@@ -245,8 +240,7 @@ the cap.
   precision relativity solver.
 - Finite step size and finite escape radius cause small drift in extremely long
   near-critical orbits.
-- Grid emission is an artistic visualization aid and does not model radiative transfer.
-- The orbital station is an artistic visualization structure, not an accretion
+- The Dyson structure is an artistic visualization, not an accretion
   disk or a model of self-supporting matter.
 - The sphere skins are visualization surfaces, not physical matter around the hole.
 - Camera motion stops at a numerical guard outside the horizon; there is no
