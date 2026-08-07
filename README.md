@@ -22,7 +22,7 @@ The shader files and local sky texture are loaded with `fetch()`, so opening
 - Click the scene: capture the pointer for mouse look
 - Mouse: yaw and pitch
 - W / S: move radially toward or away from the black hole
-- A / D: move azimuthally left or right around the black hole
+- A / D: orbit left or right at constant radius; the camera turns with the orbit
 - Space / C (or E / Q): move toward either pole
 - Shift: flight-speed boost
 - R: reset the camera
@@ -137,6 +137,9 @@ basis that is independent of the viewing direction. It eases gradually toward
 and away from its target velocity, while mouse look uses a still softer target-
 orientation response. Both use frame-rate-independent exponential responses;
 reset, focus loss, and pointer-lock transitions cancel residual motion safely.
+A/D displacement is integrated as an exact angular rotation, so it cannot add
+radial drift. The camera frame and smoothed velocity rotate by the same amount;
+simultaneous W/S velocity continues to change radius normally.
 
 ## Production camera tracks and 2K PNG export
 

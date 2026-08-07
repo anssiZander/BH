@@ -2,7 +2,7 @@ import {
   FirstPersonCamera,
   arealToIsotropic,
   isotropicToAreal,
-} from "./camera.js?v=20260804-hemispheres-v2";
+} from "./camera.js?v=20260805-orbit-v1";
 import { SchwarzschildRenderer } from "./webgl.js?v=20260804-hemispheres-v2";
 import {
   CameraTrackRecorder,
@@ -18,7 +18,7 @@ import {
   inspectProductionSupport,
 } from "./production-renderer.js?v=20260804-hemispheres-v2";
 
-const APPLICATION_VERSION = "2026.08.04-hemispheres-v2";
+const APPLICATION_VERSION = "2026.08.05-orbit-v1";
 const MAX_PRODUCTION_FRAMES = 1_000_000;
 const GPU_SAFE_MODE_STORAGE_KEY = "schwarzschild-gpu-safe-mode";
 

@@ -4,6 +4,19 @@ The current two-hemisphere revision is recorded first. Older measurements are
 retained below as historical records for the unchanged ray equation and retired
 scene implementations.
 
+## Radius-preserving orbital controls (5 August 2026)
+
+- A/D displacement is separated from the smoothed Cartesian step and applied as
+  an exact rotation about the world Y axis. Pure A/D motion preserves isotropic
+  radius and latitude, while simultaneous or residual W/S velocity changes the
+  radius independently.
+- Camera yaw, target yaw, current velocity, and target velocity rotate through
+  the same orbital angle. A camera initially aimed radially inward therefore
+  remains aimed inward through an orbit without simultaneous mouse turning.
+- Three deterministic movement tests cover radius preservation, camera-frame
+  co-rotation, and combined radial/angular motion. The complete `node --test`
+  suite passes all 20 tests.
+
 ## Two Dyson hemispheres and retired grids (4 August 2026)
 
 - The structure envelope is the intersection of a `0.11M` radial photon-shell
