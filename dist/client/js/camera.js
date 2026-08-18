@@ -23,6 +23,46 @@ function cross(out, ax, ay, az, bx, by, bz) {
   return out;
 }
 
+export function rotateAroundWorldY(out, vector, angle) {
+  const x = vector[0];
+  const y = vector[1];
+  const z = vector[2];
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  out[0] = cosine * x - sine * z;
+  out[1] = y;
+  out[2] = sine * x + cosine * z;
+  return out;
+}
+
+export function applyOrbitalDisplacement(
+  out,
+  position,
+  displacement,
+  orbitTangent,
+) {
+  const orbitDistance =
+    displacement[0] * orbitTangent[0]
+    + displacement[1] * orbitTangent[1]
+    + displacement[2] * orbitTangent[2];
+  const translatedX =
+    position[0] + displacement[0] - orbitTangent[0] * orbitDistance;
+  const translatedY =
+    position[1] + displacement[1] - orbitTangent[1] * orbitDistance;
+  const translatedZ =
+    position[2] + displacement[2] - orbitTangent[2] * orbitDistance;
+  const horizontalRadius = Math.hypot(translatedX, translatedZ);
+  const orbitAngle = horizontalRadius > 1e-8
+    ? orbitDistance / horizontalRadius
+    : 0;
+  const cosine = Math.cos(orbitAngle);
+  const sine = Math.sin(orbitAngle);
+  out[0] = cosine * translatedX - sine * translatedZ;
+  out[1] = translatedY;
+  out[2] = sine * translatedX + cosine * translatedZ;
+  return orbitAngle;
+}
+
 export function isotropicToAreal(rho) {
   if (rho <= 0) return 2;
   const factor = 1 + 0.5 / rho;
@@ -159,25 +199,19 @@ export class FirstPersonCamera {
       -this.position[1],
       -this.position[2],
     );
-    const nearlyPolar = Math.abs(this.travelInward[1]) > 0.95;
-    const referenceX = 0;
-    const referenceY = nearlyPolar ? 0 : 1;
-    const referenceZ = nearlyPolar ? 1 : 0;
-    cross(
-      this.travelRight,
-      this.travelInward[0],
-      this.travelInward[1],
-      this.travelInward[2],
-      referenceX,
-      referenceY,
-      referenceZ,
+    const horizontalRadius = Math.hypot(
+      this.position[0],
+      this.position[2],
     );
-    normalize(
-      this.travelRight,
-      this.travelRight[0],
-      this.travelRight[1],
-      this.travelRight[2],
-    );
+    if (horizontalRadius > 1e-8) {
+      this.travelRight[0] = -this.position[2] / horizontalRadius;
+      this.travelRight[1] = 0;
+      this.travelRight[2] = this.position[0] / horizontalRadius;
+    } else {
+      this.travelRight[0] = 1;
+      this.travelRight[1] = 0;
+      this.travelRight[2] = 0;
+    }
     cross(
       this.travelUp,
       this.travelRight[0],
@@ -271,9 +305,27 @@ export class FirstPersonCamera {
         + (oldVelocity - desiredVelocity) * decay;
     }
 
-    let nx = this.position[0] + this.displacement[0];
-    let ny = this.position[1] + this.displacement[1];
-    let nz = this.position[2] + this.displacement[2];
+    const orbitAngle = applyOrbitalDisplacement(
+      this.position,
+      this.position,
+      this.displacement,
+      this.travelRight,
+    );
+    if (Math.abs(orbitAngle) > 1e-12) {
+      this.yaw -= orbitAngle;
+      this.targetYaw -= orbitAngle;
+      rotateAroundWorldY(this.velocity, this.velocity, orbitAngle);
+      rotateAroundWorldY(
+        this.targetVelocity,
+        this.targetVelocity,
+        orbitAngle,
+      );
+      this._updateBasis();
+    }
+
+    let nx = this.position[0];
+    let ny = this.position[1];
+    let nz = this.position[2];
     const newRadius = Math.hypot(nx, ny, nz);
 
     if (newRadius < HORIZON_GUARD) {

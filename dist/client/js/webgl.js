@@ -1,22 +1,21 @@
-const RUNTIME_ASSET_VERSION = "20260801-context-v4";
+const RUNTIME_ASSET_VERSION = "20260818-webxr-v1";
 const runtimeAsset = (path) => `${path}?v=${RUNTIME_ASSET_VERSION}`;
 
 const SHADER_PATHS = {
   vertex: runtimeAsset("shaders/fullscreen.vert"),
-  fragment: runtimeAsset("shaders/schwarzschild.frag"),
-  orbitalStation: runtimeAsset("shaders/orbital_station.glsl"),
+  fragment: runtimeAsset("shaders/schwarzschild-vr.frag"),
   fxaa: runtimeAsset("shaders/fxaa.frag"),
   rcas: runtimeAsset("shaders/rcas.frag"),
 };
 
 const SKY_TEXTURE_PATH = runtimeAsset("assets/galaxy_4k.jpg");
-const ORBITAL_STATION_MARKER = "/*__ORBITAL_STATION_GLSL__*/";
 const MAX_HISTORY_FRAME_GAP = 0.12;
 const TEMPORAL_HISTORY_WEIGHT = 0.9;
 const RCAS_SHARPNESS = 0.18;
 const ZERO_JITTER = [0, 0];
 const ASSET_RETRY_DELAYS = [0, 350, 800, 1600, 3200, 5000];
-const MAX_SKY_TEXTURE_WIDTH = 3072;
+// PC-VR keeps the complete ESO panorama when the desktop GPU supports it.
+const MAX_SKY_TEXTURE_WIDTH = 6000;
 const TARGET_SIZE_RETRY_FACTORS = [1, 0.75, 0.5];
 
 function radicalInverse(index, base) {
@@ -166,58 +165,6 @@ function createSkyTexture(gl, image) {
   return { texture, width, height };
 }
 
-async function createPhotonLabelTexture(gl) {
-  try {
-    await document.fonts.load('700 78px "Orbitron"');
-  } catch {
-    // Canvas falls back cleanly if the local face cannot be decoded.
-  }
-
-  const labelCanvas = document.createElement("canvas");
-  labelCanvas.width = 2048;
-  labelCanvas.height = 256;
-  const context = labelCanvas.getContext("2d");
-  const label = "PHOTON SPHERE";
-  const spacing = 8;
-  context.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
-  context.font = '700 78px "Orbitron", sans-serif';
-  context.textAlign = "left";
-  context.textBaseline = "middle";
-  context.fillStyle = "#ffffff";
-
-  const glyphWidths = Array.from(label, (glyph) =>
-    context.measureText(glyph).width
-  );
-  const labelWidth =
-    glyphWidths.reduce((sum, width) => sum + width, 0)
-    + spacing * (label.length - 1);
-  let cursor = (labelCanvas.width - labelWidth) * 0.5;
-  for (let index = 0; index < label.length; index += 1) {
-    context.fillText(label[index], cursor, labelCanvas.height * 0.53);
-    cursor += glyphWidths[index] + spacing;
-  }
-
-  const texture = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texImage2D(
-    gl.TEXTURE_2D,
-    0,
-    gl.RGBA8,
-    gl.RGBA,
-    gl.UNSIGNED_BYTE,
-    labelCanvas,
-  );
-  gl.generateMipmap(gl.TEXTURE_2D);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-  gl.bindTexture(gl.TEXTURE_2D, null);
-  return texture;
-}
-
 function createColorTarget(gl) {
   const texture = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -364,6 +311,7 @@ export class SchwarzschildRenderer {
       stencil: false,
       powerPreference: "high-performance",
       preserveDrawingBuffer: false,
+      xrCompatible: true,
     };
     let gl = canvas.getContext("webgl2", contextAttributes);
 
@@ -384,27 +332,15 @@ export class SchwarzschildRenderer {
     onProgress("Loading standalone GLSL shaders…");
     const [
       vertexSource,
-      fragmentTemplate,
-      orbitalStationSource,
+      fragmentSource,
       fxaaSource,
       rcasSource,
     ] = await Promise.all([
       fetchText(SHADER_PATHS.vertex, onProgress),
       fetchText(SHADER_PATHS.fragment, onProgress),
-      fetchText(SHADER_PATHS.orbitalStation, onProgress),
       fetchText(SHADER_PATHS.fxaa, onProgress),
       fetchText(SHADER_PATHS.rcas, onProgress),
     ]);
-    const markerCount = fragmentTemplate.split(ORBITAL_STATION_MARKER).length - 1;
-    if (markerCount !== 1) {
-      throw new Error(
-        `Expected exactly one ${ORBITAL_STATION_MARKER} marker in the fragment shader; found ${markerCount}.`,
-      );
-    }
-    const fragmentSource = fragmentTemplate.replace(
-      ORBITAL_STATION_MARKER,
-      orbitalStationSource,
-    );
 
     const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
     const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
@@ -421,7 +357,6 @@ export class SchwarzschildRenderer {
     onProgress("Decoding and fitting the spherical sky field…");
     const skyImage = await loadImage(SKY_TEXTURE_PATH, onProgress);
     const skyTexture = createSkyTexture(gl, skyImage);
-    const photonLabelTexture = await createPhotonLabelTexture(gl);
 
     return new SchwarzschildRenderer(
       canvas,
@@ -430,7 +365,6 @@ export class SchwarzschildRenderer {
       fxaaProgram,
       rcasProgram,
       skyTexture.texture,
-      photonLabelTexture,
       {
         width: skyTexture.width,
         height: skyTexture.height,
@@ -445,7 +379,6 @@ export class SchwarzschildRenderer {
     fxaaProgram,
     rcasProgram,
     skyTexture,
-    photonLabelTexture,
     textureSize,
   ) {
     this.canvas = canvas;
@@ -454,7 +387,6 @@ export class SchwarzschildRenderer {
     this.fxaaProgram = fxaaProgram;
     this.rcasProgram = rcasProgram;
     this.skyTexture = skyTexture;
-    this.photonLabelTexture = photonLabelTexture;
     this.textureSize = textureSize;
     this.renderScale = 0.86;
     this.maxPixels = 2_000_000;
@@ -481,6 +413,7 @@ export class SchwarzschildRenderer {
     this.hasPreviousCamera = false;
     this.previousRenderTime = Number.NaN;
     this.previousSettingsSignature = "";
+    this.xrLayer = null;
 
     const uniformNames = [
       "uResolution",
@@ -509,8 +442,9 @@ export class SchwarzschildRenderer {
       "uExposure",
       "uSaturation",
       "uSky",
-      "uPhotonLabel",
-      "uPhotonLabelOpacity",
+      "uXRView",
+      "uInverseProjection",
+      "uEyeRotation",
     ];
 
     for (const name of uniformNames) {
@@ -540,7 +474,6 @@ export class SchwarzschildRenderer {
     gl.bindVertexArray(this.vao);
     gl.useProgram(program);
     gl.uniform1i(this.uniforms.uSky, 0);
-    gl.uniform1i(this.uniforms.uPhotonLabel, 5);
     gl.useProgram(fxaaProgram);
     gl.uniform1i(this.fxaaUniforms.uCurrentFrame, 1);
     gl.uniform1i(this.fxaaUniforms.uHistoryFrame, 2);
@@ -637,6 +570,109 @@ export class SchwarzschildRenderer {
     return true;
   }
 
+  async prepareXRSession(session, framebufferScaleFactor = 0.65) {
+    if (this.gl.isContextLost()) {
+      throw new Error("The WebGL context was lost before the VR session started.");
+    }
+    if (typeof this.gl.makeXRCompatible !== "function") {
+      throw new Error("This browser did not provide WebXR-compatible WebGL2.");
+    }
+    if (typeof window.XRWebGLLayer !== "function") {
+      throw new Error("This browser did not provide XRWebGLLayer.");
+    }
+
+    await this.gl.makeXRCompatible();
+    if (this.gl.isContextLost()) {
+      throw new Error("WebGL changed graphics adapters while VR was starting. Retry after recovery.");
+    }
+
+    const layer = new window.XRWebGLLayer(session, this.gl, {
+      antialias: false,
+      depth: false,
+      stencil: false,
+      alpha: false,
+      ignoreDepthValues: true,
+      framebufferScaleFactor,
+    });
+    try {
+      if (typeof layer.fixedFoveation === "number") {
+        layer.fixedFoveation = 0.35;
+      }
+    } catch {
+      // Foveation is optional and some runtimes expose a read-only shim.
+    }
+    session.updateRenderState({
+      baseLayer: layer,
+      depthNear: 0.05,
+      depthFar: 1000,
+    });
+    this.xrLayer = layer;
+    this.invalidateHistory();
+    return layer;
+  }
+
+  finishXRSession() {
+    this.xrLayer = null;
+    this.invalidateHistory();
+    this.previousRenderTime = Number.NaN;
+  }
+
+  renderXR(viewStates, settings, timeSeconds) {
+    if (this.gl.isContextLost() || !this.xrLayer) return false;
+
+    const gl = this.gl;
+    const u = this.uniforms;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.xrLayer.framebuffer);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.CULL_FACE);
+    gl.enable(gl.DITHER);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(this.program);
+    gl.bindVertexArray(this.vao);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.skyTexture);
+
+    gl.uniform1i(u.uXRView, 1);
+    gl.uniform1f(u.uTime, timeSeconds);
+    gl.uniform1f(u.uStationRotationSpeed, settings.stationRotationSpeed);
+    gl.uniform1i(u.uMaxSteps, settings.maxSteps);
+    gl.uniform1f(u.uBaseStep, settings.baseStep);
+    gl.uniform1i(u.uLensing, settings.lensing ? 1 : 0);
+    gl.uniform1i(u.uSpheresVisible, 0);
+    gl.uniform1i(u.uSkyVisible, settings.skyVisible ? 1 : 0);
+    gl.uniform1i(u.uRingsVisible, settings.ringsVisible ? 1 : 0);
+    gl.uniform1i(u.uShellCount, 0);
+    gl.uniform1f(u.uExposure, settings.exposure);
+    gl.uniform1f(u.uSaturation, settings.saturation);
+
+    for (const state of viewStates) {
+      const viewport = this.xrLayer.getViewport(state.view);
+      if (!viewport) continue;
+      gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+      gl.uniform2f(u.uResolution, viewport.width, viewport.height);
+      gl.uniform3fv(u.uCameraPosition, state.position);
+      gl.uniform3fv(u.uCameraForward, state.forward);
+      gl.uniform3fv(u.uCameraRight, state.right);
+      gl.uniform3fv(u.uCameraUp, state.up);
+      gl.uniform1f(u.uFovY, state.fovY);
+      gl.uniformMatrix4fv(
+        u.uInverseProjection,
+        false,
+        state.inverseProjection,
+      );
+      gl.uniformMatrix3fv(u.uEyeRotation, false, state.eyeRotation);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      if (gl.isContextLost()) return false;
+    }
+
+    gl.uniform1i(u.uXRView, 0);
+    gl.disable(gl.DITHER);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return true;
+  }
+
   render(camera, settings, timeSeconds) {
     if (this.gl.isContextLost()) return false;
     if (!this.resizeIfNeeded()) return false;
@@ -693,9 +729,8 @@ export class SchwarzschildRenderer {
     gl.bindVertexArray(this.vao);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.skyTexture);
-    gl.activeTexture(gl.TEXTURE5);
-    gl.bindTexture(gl.TEXTURE_2D, this.photonLabelTexture);
 
+    gl.uniform1i(u.uXRView, 0);
     gl.uniform2f(u.uResolution, this.canvas.width, this.canvas.height);
     gl.uniform3fv(u.uCameraPosition, camera.position);
     gl.uniform3fv(u.uCameraForward, camera.forward);
@@ -739,7 +774,6 @@ export class SchwarzschildRenderer {
     gl.uniform1i(u.uShellCount, settings.shellCount);
     gl.uniform1f(u.uExposure, settings.exposure);
     gl.uniform1f(u.uSaturation, settings.saturation);
-    gl.uniform1f(u.uPhotonLabelOpacity, settings.photonLabelOpacity);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     if (gl.isContextLost()) return false;

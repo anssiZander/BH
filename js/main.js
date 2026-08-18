@@ -2,8 +2,15 @@ import {
   FirstPersonCamera,
   arealToIsotropic,
   isotropicToAreal,
-} from "./camera.js?v=20260801-context-v4";
-import { SchwarzschildRenderer } from "./webgl.js?v=20260801-context-v4";
+} from "./camera.js?v=20260818-webxr-v1";
+import { SchwarzschildRenderer } from "./webgl.js?v=20260818-webxr-v1";
+import {
+  BlackHoleXRRig,
+  QuestControllerInput,
+  XR_FRAMEBUFFER_SCALE,
+  XR_QUALITY_PROFILE,
+  createXRViewState,
+} from "./xr.js?v=20260818-webxr-v1";
 
 const QUALITY_PROFILES = {
   low: { maxSteps: 256, scale: 0.52, maxPixels: 750_000 },
@@ -17,13 +24,9 @@ const PHOTON_RHO = (2 + Math.sqrt(3)) / 2;
 const RADIAL_TRACK_MIN_AREAL = 2;
 const RADIAL_TRACK_MAX_AREAL = 22;
 const STATION_DOUBLE_BAND_LATITUDE = 0.1875;
-const STATION_ENVELOPE_HALF_ANGLE = 0.15;
-const STATION_RADIAL_ENVELOPE = 0.11;
-const STATION_ASSEMBLY_RADII = [
-  PHOTON_RHO,
-  PHOTON_RHO + 0.3,
-  PHOTON_RHO - 0.3,
-];
+const STATION_ENVELOPE_HALF_ANGLE = 0.1125;
+const STATION_RADIAL_ENVELOPE = 0.01;
+const STATION_ASSEMBLY_RADII = [PHOTON_RHO];
 const CONTEXT_RECOVERY_KEY = "schwarzschild-context-recovery";
 const STABLE_FRAMES_BEFORE_RECOVERY_CLEAR = 120;
 const ESCAPE_RHO = 36;
@@ -45,9 +48,8 @@ const radiusMarker = document.querySelector("#radiusMarker");
 const pointerHint = document.querySelector("#pointerHint");
 const statusPill = document.querySelector("#statusPill");
 const statusText = document.querySelector("#statusText");
-const recordButton = document.querySelector("#recordButton");
-const recordButtonText = document.querySelector("#recordButtonText");
-const recordStatus = document.querySelector("#recordStatus");
+const enterVrButton = document.querySelector("#enterVrButton");
+const vrStatus = document.querySelector("#vrStatus");
 const controlsPanel = document.querySelector(".controls-panel");
 const radialLandmarks = document.querySelectorAll("[data-areal-radius]");
 
@@ -100,26 +102,19 @@ let lastTelemetryTime = 0;
 let stepCapDetected = false;
 let lastProbeTime = 0;
 let uiHidden = false;
-let photonLabelTarget = 1;
 let animationFrameId = 0;
 let rendererGeneration = 0;
 let applicationState = "starting";
 let stableFrameCount = 0;
-
-const RECORDING_FPS = 60;
-const RECORDING_VIDEO_BITS_PER_SECOND = 16_000_000;
-const recordingState = {
-  isRecording: false,
-  isFinalizing: false,
-  recorder: null,
-  stream: null,
-  chunks: [],
-  mimeType: "",
-  extension: "mp4",
-  formatLabel: "MP4",
-  startedAt: 0,
-  lastStatusSecond: -1,
-};
+let xrSession = null;
+let xrReferenceSpace = null;
+let xrInitialViewerPosition = null;
+let xrLastFrameTime = Number.NaN;
+let xrFrameRequestId = 0;
+let xrControllerCount = -1;
+let xrImmersiveSupported = null;
+const xrRig = new BlackHoleXRRig();
+const xrControllerInput = new QuestControllerInput();
 
 function bindRange(inputId, outputId, settingKey, format, onInput) {
   const input = document.querySelector(`#${inputId}`);
@@ -159,6 +154,7 @@ function bindControls() {
   bindRange("rayStepInput", "rayStepOutput", "baseStep", (value) => value.toFixed(3));
   bindRange("speedInput", "speedOutput", null, (value) => value.toFixed(2), (value) => {
     if (camera) camera.speed = value;
+    xrRig.setSpeed(value);
   });
   bindRange(
     "rotationSpeedInput",
@@ -167,7 +163,6 @@ function bindControls() {
     (value) => `${Math.round((value / 0.015) * 100)}%`,
   );
   bindRange("fovInput", "fovOutput", "fov", (value) => `${Math.round(value)}°`);
-  bindRange("shellInput", "shellOutput", "shellCount", (value) => `${Math.round(value)}`);
   bindRange("exposureInput", "exposureOutput", "exposure", (value) => value.toFixed(2));
   bindRange("saturationInput", "saturationOutput", "saturation", (value) => value.toFixed(2));
 
@@ -177,13 +172,6 @@ function bindControls() {
   };
   lensingInput.addEventListener("change", updateLensing);
   updateLensing();
-
-  const spheresVisibleInput = document.querySelector("#spheresVisibleInput");
-  const updateSphereVisibility = () => {
-    settings.spheresVisible = spheresVisibleInput.checked;
-  };
-  spheresVisibleInput.addEventListener("change", updateSphereVisibility);
-  updateSphereVisibility();
 
   const skyVisibleInput = document.querySelector("#skyVisibleInput");
   const updateSkyVisibility = () => {
@@ -199,24 +187,9 @@ function bindControls() {
   ringsVisibleInput.addEventListener("change", updateRingVisibility);
   updateRingVisibility();
 
-  const photonIndicatorInput = document.querySelector("#photonIndicatorInput");
-  const updatePhotonIndicatorVisibility = () => {
-    photonLabelTarget = photonIndicatorInput.checked ? 1 : 0;
-    renderer?.invalidateHistory();
-  };
-  photonIndicatorInput.addEventListener(
-    "change",
-    updatePhotonIndicatorVisibility,
-  );
-  updatePhotonIndicatorVisibility();
-
   document.querySelector("#resetButton").addEventListener("click", resetCamera);
   document.querySelector("#hideUiButton").addEventListener("click", toggleUi);
-  recordButton.addEventListener("click", () => {
-    if (recordingState.isRecording) stopRecording();
-    else startRecording();
-  });
-  updateRecordingIdleUi();
+  enterVrButton.addEventListener("click", () => void toggleXRSession());
 
   document.querySelector("#collapseControls").addEventListener("click", (event) => {
     const collapsed = controlsPanel.classList.toggle("collapsed");
@@ -243,11 +216,11 @@ function bindControls() {
   document.addEventListener("visibilitychange", () => {
     renderer?.invalidateHistory();
   });
-  window.addEventListener("beforeunload", releaseRecordingStream);
 }
 
 function resetCamera() {
   camera?.reset();
+  xrRig.reset();
   renderer?.invalidateHistory();
 }
 
@@ -270,10 +243,12 @@ function toggleUi() {
 function updateTelemetry(now) {
   if (now - lastTelemetryTime < 150) return;
   lastTelemetryTime = now;
-  const radius = camera.arealRadius;
+  const radius = xrSession ? xrRig.arealRadius : camera.arealRadius;
   radiusValue.textContent = `${radius.toFixed(radius < 10 ? 3 : 2)} M`;
   fpsValue.textContent = `${Math.round(smoothedFps)} FPS`;
-  stepValue.textContent = `${settings.maxSteps} RK2`;
+  stepValue.textContent = `${
+    xrSession ? XR_QUALITY_PROFILE.maxSteps : settings.maxSteps
+  } RK2`;
 
   radiusMarker.style.left = `${arealRadiusToTrackPercent(radius)}%`;
 
@@ -290,170 +265,10 @@ function updateTelemetry(now) {
   } else if (!settings.lensing) {
     statusText.textContent = "FLAT-RAY COMPARISON MODE";
   } else {
-    statusText.textContent = "SCHWARZSCHILD FIELD · STABLE";
+    statusText.textContent = xrSession
+      ? "QUEST 3 PC VR · SCHWARZSCHILD FIELD"
+      : "SCHWARZSCHILD FIELD · STABLE";
   }
-}
-
-function setRecordingStatus(message) {
-  recordStatus.textContent = message;
-}
-
-function getPreferredRecordingFormat() {
-  if (typeof MediaRecorder === "undefined") return null;
-  const candidates = [
-    { mimeType: 'video/mp4;codecs="avc1.424028"', extension: "mp4", label: "H.264 MP4" },
-    { mimeType: 'video/mp4;codecs="avc1.42E02A"', extension: "mp4", label: "H.264 MP4" },
-    { mimeType: 'video/mp4;codecs="avc1.4D402A"', extension: "mp4", label: "H.264 MP4" },
-    { mimeType: "video/mp4", extension: "mp4", label: "MP4" },
-    { mimeType: 'video/webm;codecs="vp9"', extension: "webm", label: "VP9 WebM" },
-    { mimeType: 'video/webm;codecs="vp8"', extension: "webm", label: "VP8 WebM" },
-    { mimeType: "video/webm", extension: "webm", label: "WebM" },
-  ];
-  return candidates.find(({ mimeType }) =>
-    MediaRecorder.isTypeSupported(mimeType)
-  ) || null;
-}
-
-function releaseRecordingStream() {
-  recordingState.stream?.getTracks().forEach((track) => track.stop());
-  recordingState.stream = null;
-}
-
-function resetRecordingUi() {
-  recordButton.classList.remove("recording");
-  updateRecordingIdleUi();
-}
-
-function updateRecordingIdleUi() {
-  const format = getPreferredRecordingFormat();
-  recordButton.disabled = !format;
-  recordButtonText.textContent =
-    format?.extension === "webm" ? "Record WebM" : "Record MP4";
-  if (format) {
-    setRecordingStatus(`Ready for ${format.label} · ${RECORDING_FPS} fps`);
-  } else {
-    setRecordingStatus("Recording is unavailable in this browser");
-  }
-}
-
-function startRecording() {
-  if (recordingState.isRecording || recordingState.isFinalizing) return;
-  if (
-    typeof MediaRecorder === "undefined"
-    || typeof canvas.captureStream !== "function"
-  ) {
-    setRecordingStatus("Recording is unavailable in this browser");
-    return;
-  }
-
-  const format = getPreferredRecordingFormat();
-  if (!format) {
-    setRecordingStatus("No supported video encoder was found");
-    return;
-  }
-
-  const stream = canvas.captureStream(RECORDING_FPS);
-  if (!stream.getVideoTracks().length) {
-    stream.getTracks().forEach((track) => track.stop());
-    setRecordingStatus("The renderer did not provide a video track");
-    return;
-  }
-
-  let recorder;
-  try {
-    recorder = new MediaRecorder(stream, {
-      mimeType: format.mimeType,
-      videoBitsPerSecond: RECORDING_VIDEO_BITS_PER_SECOND,
-    });
-  } catch (error) {
-    console.error(error);
-    stream.getTracks().forEach((track) => track.stop());
-    setRecordingStatus("The browser could not start its video encoder");
-    return;
-  }
-
-  recordingState.recorder = recorder;
-  recordingState.stream = stream;
-  recordingState.chunks = [];
-  recordingState.mimeType = recorder.mimeType || format.mimeType;
-  recordingState.extension = format.extension;
-  recordingState.formatLabel = format.label;
-  recorder.ondataavailable = (event) => {
-    if (event.data?.size) recordingState.chunks.push(event.data);
-  };
-  recorder.onerror = (event) => {
-    console.error("MediaRecorder error:", event.error || event);
-    setRecordingStatus("Recording failed; stop to finalize available frames");
-  };
-  recorder.onstop = () => {
-    const chunks = recordingState.chunks.slice();
-    const mimeType = recordingState.mimeType;
-    const extension = recordingState.extension;
-    const formatLabel = recordingState.formatLabel;
-    releaseRecordingStream();
-    recordingState.recorder = null;
-    recordingState.chunks = [];
-    recordingState.isFinalizing = false;
-    resetRecordingUi();
-
-    if (!chunks.length) {
-      setRecordingStatus("No recording data was produced");
-      return;
-    }
-
-    const blob = new Blob(chunks, { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `schwarzschild-field-${Date.now()}.${extension}`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-    setRecordingStatus(
-      `Saved ${formatLabel} · ${(blob.size / 1_048_576).toFixed(1)} MB`,
-    );
-  };
-
-  try {
-    recorder.start();
-  } catch (error) {
-    console.error(error);
-    releaseRecordingStream();
-    recordingState.recorder = null;
-    recordingState.chunks = [];
-    setRecordingStatus("The video encoder could not begin recording");
-    return;
-  }
-
-  recordingState.isRecording = true;
-  recordingState.startedAt = performance.now();
-  recordingState.lastStatusSecond = -1;
-  recordButton.classList.add("recording");
-  recordButtonText.textContent = "Stop recording";
-  setRecordingStatus(`Recording ${format.label} · ${RECORDING_FPS} fps`);
-}
-
-function stopRecording() {
-  if (!recordingState.isRecording || !recordingState.recorder) return;
-  recordingState.isRecording = false;
-  recordingState.isFinalizing = true;
-  recordButton.disabled = true;
-  recordButtonText.textContent = "Finalizing…";
-  setRecordingStatus(`Finalizing ${recordingState.formatLabel}…`);
-  recordingState.recorder.stop();
-}
-
-function updateRecordingStatus(now) {
-  if (!recordingState.isRecording) return;
-  const elapsedSeconds = Math.floor((now - recordingState.startedAt) / 1000);
-  if (elapsedSeconds === recordingState.lastStatusSecond) return;
-  recordingState.lastStatusSecond = elapsedSeconds;
-  const minutes = Math.floor(elapsedSeconds / 60);
-  const seconds = String(elapsedSeconds % 60).padStart(2, "0");
-  setRecordingStatus(
-    `Recording ${recordingState.formatLabel} · ${minutes}:${seconds} · ${RECORDING_FPS} fps`,
-  );
 }
 
 function opticalAcceleration(position, direction) {
@@ -856,6 +671,210 @@ function runPhysicsSelfCheck() {
   };
 }
 
+function setVrStatus(message) {
+  vrStatus.textContent = message;
+}
+
+async function checkXRSupport() {
+  if (!window.isSecureContext) {
+    xrImmersiveSupported = false;
+    enterVrButton.disabled = true;
+    setVrStatus("VR requires HTTPS or localhost");
+    return false;
+  }
+  if (!navigator.xr) {
+    xrImmersiveSupported = false;
+    enterVrButton.disabled = true;
+    setVrStatus("WebXR is unavailable in this browser");
+    return false;
+  }
+
+  enterVrButton.disabled = true;
+  setVrStatus("Checking Meta Quest Link…");
+  try {
+    const supported = await navigator.xr.isSessionSupported("immersive-vr");
+    xrImmersiveSupported = supported;
+    enterVrButton.disabled = false;
+    enterVrButton.textContent = supported ? "Enter Quest 3 VR" : "Check Quest Link";
+    setVrStatus(
+      supported
+        ? "Quest Link detected · controllers: left move, right vertical"
+        : "Start Quest Link, connect the headset, then check again",
+    );
+    return supported;
+  } catch (error) {
+    console.error(error);
+    xrImmersiveSupported = false;
+    enterVrButton.disabled = false;
+    enterVrButton.textContent = "Check Quest Link";
+    setVrStatus("The browser could not query the VR runtime");
+    return false;
+  }
+}
+
+function xrRenderSettings() {
+  return {
+    ...settings,
+    maxSteps: XR_QUALITY_PROFILE.maxSteps,
+    baseStep: XR_QUALITY_PROFILE.baseStep,
+    spheresVisible: false,
+    shellCount: 0,
+    photonLabelOpacity: 0,
+  };
+}
+
+function handleXRSessionEnded(endedSession) {
+  if (xrSession && xrSession !== endedSession) return;
+  xrSession = null;
+  xrReferenceSpace = null;
+  xrInitialViewerPosition = null;
+  xrLastFrameTime = Number.NaN;
+  xrFrameRequestId = 0;
+  xrControllerCount = -1;
+  renderer?.finishXRSession();
+  document.body.classList.remove("xr-active");
+  enterVrButton.disabled = false;
+  enterVrButton.textContent = "Enter Quest 3 VR";
+  setVrStatus("VR session ended · desktop view resumed");
+  lastFrameTime = performance.now();
+  if (applicationState === "running" && renderer && !animationFrameId) {
+    animationFrameId = requestAnimationFrame(animate);
+  }
+}
+
+async function startXRSession() {
+  if (xrSession || applicationState !== "running" || !renderer) return;
+  if (xrImmersiveSupported !== true) {
+    await checkXRSupport();
+    if (xrImmersiveSupported) {
+      setVrStatus("Quest Link is ready · click Enter Quest 3 VR again");
+    }
+    return;
+  }
+
+  enterVrButton.disabled = true;
+  setVrStatus("Opening Quest 3 immersive session…");
+  let session;
+  try {
+    session = await navigator.xr.requestSession("immersive-vr", {
+      optionalFeatures: ["local-floor"],
+    });
+    const sessionRenderer = renderer;
+    xrSession = session;
+    session.addEventListener(
+      "end",
+      () => handleXRSessionEnded(session),
+      { once: true },
+    );
+    await sessionRenderer.prepareXRSession(
+      session,
+      XR_FRAMEBUFFER_SCALE,
+    );
+    if (renderer !== sessionRenderer || applicationState !== "running") {
+      throw new Error("The renderer changed while Quest Link was starting.");
+    }
+
+    xrReferenceSpace = await session.requestReferenceSpace("local");
+    xrRig.reset();
+    xrRig.setSpeed(Number(document.querySelector("#speedInput").value));
+    xrInitialViewerPosition = null;
+    xrLastFrameTime = Number.NaN;
+    smoothedFps = Number(session.frameRate) || 72;
+    stopAnimation();
+    document.body.classList.add("xr-active");
+    enterVrButton.disabled = false;
+    enterVrButton.textContent = "Exit VR";
+    const refresh = Number(session.frameRate);
+    setVrStatus(
+      refresh > 0
+        ? `Quest 3 active at ${Math.round(refresh)} Hz · A/X resets position`
+        : "Quest 3 active · A/X resets position",
+    );
+    xrFrameRequestId = session.requestAnimationFrame(onXRFrame);
+  } catch (error) {
+    console.error(error);
+    setVrStatus(error instanceof Error ? error.message : String(error));
+    enterVrButton.disabled = false;
+    enterVrButton.textContent = "Check Quest Link";
+    if (session) {
+      try {
+        await session.end();
+      } catch {
+        handleXRSessionEnded(session);
+      }
+    } else {
+      xrSession = null;
+    }
+  }
+}
+
+async function toggleXRSession() {
+  if (xrSession) {
+    enterVrButton.disabled = true;
+    setVrStatus("Closing VR session…");
+    await xrSession.end();
+    return;
+  }
+  await startXRSession();
+}
+
+function onXRFrame(time, frame) {
+  const session = frame.session;
+  if (!xrSession || session !== xrSession || !renderer || !xrReferenceSpace) {
+    return;
+  }
+  xrFrameRequestId = session.requestAnimationFrame(onXRFrame);
+
+  try {
+    const pose = frame.getViewerPose(xrReferenceSpace);
+    if (!pose) return;
+    if (!xrInitialViewerPosition) {
+      xrInitialViewerPosition = {
+        x: pose.transform.position.x,
+        y: pose.transform.position.y,
+        z: pose.transform.position.z,
+      };
+    }
+
+    const deltaSeconds = Number.isFinite(xrLastFrameTime)
+      ? Math.min((time - xrLastFrameTime) / 1000, 0.05)
+      : 0;
+    xrLastFrameTime = time;
+    const controllerState = xrControllerInput.read(session.inputSources);
+    xrRig.update(deltaSeconds, controllerState);
+    if (controllerState.controllers !== xrControllerCount) {
+      xrControllerCount = controllerState.controllers;
+      if (xrControllerCount < 2) {
+        setVrStatus("Quest 3 active · wake both Touch controllers");
+      } else {
+        setVrStatus("Left stick: radial/orbit · right stick: polar · grip: boost · A/X: reset");
+      }
+    }
+
+    const viewStates = pose.views.map((view) =>
+      createXRViewState(view, xrInitialViewerPosition, xrRig)
+    );
+    const sceneTime = Number.isFinite(frame.predictedDisplayTime)
+      ? frame.predictedDisplayTime / 1000
+      : time / 1000;
+    if (!renderer.renderXR(viewStates, xrRenderSettings(), sceneTime)) return;
+
+    if (deltaSeconds > 0) {
+      const instantaneousFps = 1 / Math.max(deltaSeconds, 1 / 240);
+      smoothedFps += (instantaneousFps - smoothedFps) * 0.055;
+    }
+    updateTelemetry(time);
+    stableFrameCount += 1;
+    if (stableFrameCount === STABLE_FRAMES_BEFORE_RECOVERY_CLEAR) {
+      clearContextRecoveryCount();
+    }
+  } catch (error) {
+    console.error(error);
+    setVrStatus("VR rendering stopped after an unexpected error");
+    void session.end();
+  }
+}
+
 function stopAnimation() {
   if (animationFrameId) {
     cancelAnimationFrame(animationFrameId);
@@ -882,6 +901,7 @@ function failRuntime(error) {
 
 function handleContextLost(event) {
   event.preventDefault();
+  if (xrSession) void xrSession.end();
   rendererGeneration += 1;
   applicationState = "context-lost";
   stopAnimation();
@@ -904,18 +924,12 @@ async function handleContextRestored() {
 
 function animate(now) {
   animationFrameId = 0;
-  if (applicationState !== "running" || !renderer || !camera) return;
+  if (applicationState !== "running" || !renderer || !camera || xrSession) return;
 
   try {
     const deltaSeconds = Math.min((now - lastFrameTime) / 1000, 0.05);
     lastFrameTime = now;
     camera.update(deltaSeconds);
-    const labelBlend = 1 - Math.exp(-4.5 * deltaSeconds);
-    settings.photonLabelOpacity +=
-      (photonLabelTarget - settings.photonLabelOpacity) * labelBlend;
-    if (Math.abs(photonLabelTarget - settings.photonLabelOpacity) < 0.001) {
-      settings.photonLabelOpacity = photonLabelTarget;
-    }
 
     if (!renderer.render(camera, settings, now / 1000)) return;
 
@@ -923,7 +937,6 @@ function animate(now) {
     smoothedFps += (instantaneousFps - smoothedFps) * 0.035;
     probeCriticalRays(now);
     updateTelemetry(now);
-    updateRecordingStatus(now);
     stableFrameCount += 1;
     if (stableFrameCount === STABLE_FRAMES_BEFORE_RECOVERY_CLEAR) {
       clearContextRecoveryCount();
@@ -1003,6 +1016,7 @@ async function start() {
   camera = new FirstPersonCamera(canvas);
   bindControls();
   camera.speed = Number(document.querySelector("#speedInput").value);
+  xrRig.setSpeed(camera.speed);
   retryStartupButton.addEventListener("click", () => window.location.reload());
   canvas.addEventListener("webglcontextlost", handleContextLost, false);
   canvas.addEventListener(
@@ -1011,6 +1025,7 @@ async function start() {
     false,
   );
   await initializeRenderer(false);
+  await checkXRSupport();
 }
 
 start();

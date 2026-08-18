@@ -9,8 +9,8 @@ const worker = {
 
     const origin = new URL(request.url).origin;
     const html = (await response.text()).replaceAll(
-      'content="https://schwarzschild-optical-field.anssmirk.chatgpt.site/assets/social-preview-coplanar-doublets.png"',
-      `content="${origin}/assets/social-preview-coplanar-doublets.png"`,
+      'content="https://schwarzschild-optical-field.anssmirk.chatgpt.site/assets/social-preview-photon-bands.png"',
+      `content="${origin}/assets/social-preview-photon-bands.png"`,
     );
     const headers = new Headers(response.headers);
     headers.set("content-type", "text/html; charset=utf-8");

@@ -5,38 +5,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="A real-time Schwarzschild optics laboratory with three nested double-band Dyson assemblies."
+      content="A Quest 3 PC-VR Schwarzschild optics simulation with controller locomotion and a simplified photon-sphere double band."
     />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Schwarzschild Optical Field" />
+    <meta property="og:title" content="Schwarzschild Field VR" />
     <meta
       property="og:description"
-      content="Fly through numerically integrated light paths and three nested double-band Dyson assemblies around a Schwarzschild black hole."
+      content="Enter a PC-VR Schwarzschild field, fly with Quest Touch controllers, and inspect a double band at the photon sphere."
     />
     <meta
       property="og:image"
-      content="https://schwarzschild-optical-field.anssmirk.chatgpt.site/assets/social-preview-coplanar-doublets.png"
+      content="https://schwarzschild-optical-field.anssmirk.chatgpt.site/assets/social-preview-photon-bands.png"
     />
     <meta property="og:image:width" content="1730" />
     <meta property="og:image:height" content="909" />
     <meta
       property="og:image:alt"
-      content="Three nested greebled Dyson doublets sharing one equatorial plane around a Schwarzschild black hole"
+      content="A simplified double band surrounding a Schwarzschild black hole against a detailed star field"
     />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Schwarzschild Optical Field" />
+    <meta name="twitter:title" content="Schwarzschild Field VR" />
     <meta
       name="twitter:description"
-      content="A real-time WebGL2 laboratory for Schwarzschild lensing and three independently oriented Dyson doublets."
+      content="A Quest 3 PC-VR WebXR simulation of Schwarzschild lensing and the photon sphere."
     />
     <meta
       name="twitter:image"
-      content="https://schwarzschild-optical-field.anssmirk.chatgpt.site/assets/social-preview-coplanar-doublets.png"
+      content="https://schwarzschild-optical-field.anssmirk.chatgpt.site/assets/social-preview-photon-bands.png"
     />
     <meta name="theme-color" content="#03040b" />
     <link rel="icon" href="data:," />
-    <title>Schwarzschild Optical Field</title>
-    <link rel="stylesheet" href="styles.css" />
+    <title>Schwarzschild Field VR</title>
+    <link rel="stylesheet" href="styles.css?v=20260818-webxr-v1" />
   </head>
   <body>
     <main class="app-shell">
@@ -114,11 +114,6 @@
             </label>
 
             <label class="range-control">
-              <span>Visible shells <output id="shellOutput">8</output></span>
-              <input id="shellInput" type="range" min="1" max="8" step="1" value="8" />
-            </label>
-
-            <label class="range-control">
               <span>Exposure <output id="exposureOutput">1.10</output></span>
               <input id="exposureInput" type="range" min="0.35" max="2.25" step="0.05" value="1.10" />
             </label>
@@ -136,11 +131,6 @@
               <span>Lensing</span>
             </label>
             <label class="switch-control">
-              <input id="spheresVisibleInput" type="checkbox" />
-              <span class="switch-track"><span></span></span>
-              <span>Spheres</span>
-            </label>
-            <label class="switch-control">
               <input id="skyVisibleInput" type="checkbox" checked />
               <span class="switch-track"><span></span></span>
               <span>Sky</span>
@@ -148,25 +138,19 @@
             <label class="switch-control">
               <input id="ringsVisibleInput" type="checkbox" checked />
               <span class="switch-track"><span></span></span>
-              <span>Station bands</span>
-            </label>
-            <label class="switch-control">
-              <input id="photonIndicatorInput" type="checkbox" checked />
-              <span class="switch-track"><span></span></span>
-              <span>Photon label</span>
+              <span>Photon double band</span>
             </label>
           </div>
 
           <div class="button-row">
             <button id="resetButton" class="text-button" type="button">Reset camera <kbd>R</kbd></button>
             <button id="hideUiButton" class="text-button muted" type="button">Hide UI <kbd>H</kbd></button>
-            <button id="recordButton" class="text-button record-button" type="button">
-              <span class="record-dot" aria-hidden="true"></span>
-              <span id="recordButtonText">Record MP4</span>
+            <button id="enterVrButton" class="text-button vr-button" type="button" disabled>
+              Checking Quest Link…
             </button>
           </div>
-          <p id="recordStatus" class="record-status" role="status" aria-live="polite">
-            Ready to record at 60 fps
+          <p id="vrStatus" class="vr-status" role="status" aria-live="polite">
+            Preparing WebXR support…
           </p>
         </div>
       </section>
@@ -179,6 +163,13 @@
           <div><span><kbd>SPACE</kbd><kbd>C</kbd></span><em>polar up / down</em></div>
           <div><span><kbd>SHIFT</kbd></span><em>boost</em></div>
           <div><span class="mouse-symbol">MOUSE</span><em>look</em></div>
+        </div>
+        <div class="xr-guide">
+          <strong>QUEST TOUCH</strong>
+          <span>Left stick · radial / orbit</span>
+          <span>Right stick · polar up / down</span>
+          <span>Grip · boost</span>
+          <span>A or X · reset position</span>
         </div>
         <p id="pointerHint">Click the field to capture the pointer</p>
         <a
@@ -199,7 +190,7 @@
           <span></span><span></span><span></span>
         </div>
         <p>CALIBRATING NULL GEODESICS</p>
-        <small id="loadingDetail">Fetching shaders and spherical sky field…</small>
+        <small id="loadingDetail">Fetching the VR shader and spherical sky field…</small>
       </div>
 
       <div id="fatalError" class="fatal-error glass-panel" hidden>
@@ -214,7 +205,7 @@
 
     <script
       type="module"
-      src="js/main.js?v=20260801-context-v4"
+      src="js/main.js?v=20260818-webxr-v1"
     ></script>
   </body>
 </html>
