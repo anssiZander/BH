@@ -21,7 +21,7 @@
   black-hole-centered orbital displacement instead of a tangent-line drift.
 - Source and distribution files are checked for byte equality before deployment.
 
-## Local PC-VR readiness
+## Initial local PC-VR readiness (18 August profile)
 
 - Target GPU: NVIDIA GeForce RTX 4070 Ti SUPER.
 - Meta/Oculus is selected as the Windows OpenXR runtime.
@@ -32,19 +32,47 @@
 - VR starts at 224 RK2 steps and a 0.65 framebuffer scale rather than assuming
   that native Quest render resolution will sustain the headset refresh rate.
 
-## Not yet verified
+## 21 August 2026: physical Quest result and aggressive pass
 
-The Quest 3 was not connected through Quest Link during this validation pass,
-so `navigator.xr.isSessionSupported("immersive-vr")` correctly returned false.
-The following remain real acceptance gates rather than claimed successes:
+The first physical Quest 3 session successfully entered immersive VR. The user
+reported that the image was very laggy, slow, and jagged under head movement.
+Stereo appeared to be present but could not be judged confidently at that frame
+rate. This is useful acceptance evidence for session startup, but not evidence
+of acceptable VR performance or correct stereo comfort.
 
-1. Enter an immersive session in the Quest 3 without an OpenXR or permission error.
-2. Confirm both eye images have correct stereo convergence and no projection flip.
-3. Confirm left-stick radial/orbital motion, right-stick polar motion, grip boost,
+This build therefore makes a deliberate playability tradeoff:
+
+- WebXR framebuffer scale: 0.65 to 0.42.
+- Ray cap: 224 midpoint/RK2 steps to 112 XR-fast steps.
+- Base step: `0.10M` to `0.14M`; photon-sphere minimum: `0.018M` to `0.034M`.
+- Optical-field evaluations: two per XR step to one; the desktop path remains RK2.
+- Requested fixed foveation: 0.35 to 0.65 when supported.
+- Sky source retained at 6000 x 3000, with linear brightness multiplied by 0.5.
+- Runtime asks for the lowest supported refresh rate at or above 72 Hz.
+- Once-per-second telemetry reports target Hz, app FPS, actual per-eye viewport,
+  slow-frame percentage, and the XR step cap.
+
+The scale and ray-cap changes alone reduce nominal pixel-step work to about 21%
+of the first build. This estimate is architectural, not a measured Quest result.
+
+Eight Node tests pass, including the new aggressive-profile and refresh-rate
+selection contract. JavaScript syntax checks and `git diff --check` pass. A
+fresh real Chromium/WebGL2 load compiled the complete shader, displayed the
+lensed sky and double band, reported `6000×3000 sky loaded · optics stable`,
+and produced no console warnings or errors. Its desktop frame rate is not used
+as Quest performance evidence. The new immersive path still needs the physical
+headset re-test below.
+
+## Current headset re-test gates
+
+1. Confirm head rotation responds without visible delayed stepping or prolonged
+   reprojection.
+2. After at least five seconds, exit VR and record the last telemetry sample:
+   target Hz, app FPS, per-eye viewport, and slow-frame percentage.
+3. Re-check stereo convergence and projection orientation once motion is smooth
+   enough to judge them separately.
+4. Confirm left-stick radial/orbital motion, right-stick polar motion, grip boost,
    and A/X reset on the physical Touch controllers.
-4. Measure sustained headset frame timing at the negotiated refresh rate.
-5. Check comfort during orbiting and adjust acceleration or turn conventions if needed.
-6. Reduce framebuffer scale or ray steps if application frames are reprojected.
+5. Check comfort during orbiting and note whether Quest Link or Air Link is used.
 
-The browser and automated results establish that the WebGL shader and control
-math work, but they do not substitute for this headset pass.
+Desktop browser and automated results cannot substitute for this headset pass.

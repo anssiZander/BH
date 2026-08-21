@@ -1,4 +1,4 @@
-const RUNTIME_ASSET_VERSION = "20260818-webxr-v1";
+const RUNTIME_ASSET_VERSION = "20260821-vr-fast-v2";
 const runtimeAsset = (path) => `${path}?v=${RUNTIME_ASSET_VERSION}`;
 
 const SHADER_PATHS = {
@@ -414,6 +414,7 @@ export class SchwarzschildRenderer {
     this.previousRenderTime = Number.NaN;
     this.previousSettingsSignature = "";
     this.xrLayer = null;
+    this.xrFrameStats = null;
 
     const uniformNames = [
       "uResolution",
@@ -570,7 +571,7 @@ export class SchwarzschildRenderer {
     return true;
   }
 
-  async prepareXRSession(session, framebufferScaleFactor = 0.65) {
+  async prepareXRSession(session, framebufferScaleFactor = 0.42) {
     if (this.gl.isContextLost()) {
       throw new Error("The WebGL context was lost before the VR session started.");
     }
@@ -596,7 +597,7 @@ export class SchwarzschildRenderer {
     });
     try {
       if (typeof layer.fixedFoveation === "number") {
-        layer.fixedFoveation = 0.35;
+        layer.fixedFoveation = 0.65;
       }
     } catch {
       // Foveation is optional and some runtimes expose a read-only shim.
@@ -613,6 +614,7 @@ export class SchwarzschildRenderer {
 
   finishXRSession() {
     this.xrLayer = null;
+    this.xrFrameStats = null;
     this.invalidateHistory();
     this.previousRenderTime = Number.NaN;
   }
@@ -647,9 +649,17 @@ export class SchwarzschildRenderer {
     gl.uniform1f(u.uExposure, settings.exposure);
     gl.uniform1f(u.uSaturation, settings.saturation);
 
+    let viewCount = 0;
+    let totalPixels = 0;
+    let maxWidth = 0;
+    let maxHeight = 0;
     for (const state of viewStates) {
       const viewport = this.xrLayer.getViewport(state.view);
       if (!viewport) continue;
+      viewCount += 1;
+      totalPixels += viewport.width * viewport.height;
+      maxWidth = Math.max(maxWidth, viewport.width);
+      maxHeight = Math.max(maxHeight, viewport.height);
       gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
       gl.uniform2f(u.uResolution, viewport.width, viewport.height);
       gl.uniform3fv(u.uCameraPosition, state.position);
@@ -668,6 +678,12 @@ export class SchwarzschildRenderer {
     }
 
     gl.uniform1i(u.uXRView, 0);
+    this.xrFrameStats = {
+      viewCount,
+      totalPixels,
+      maxWidth,
+      maxHeight,
+    };
     gl.disable(gl.DITHER);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     return true;

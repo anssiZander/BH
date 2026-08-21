@@ -4,8 +4,11 @@ import test from "node:test";
 import {
   BlackHoleXRRig,
   QuestControllerInput,
+  XR_FRAMEBUFFER_SCALE,
   XR_METERS_TO_M,
+  XR_QUALITY_PROFILE,
   applyOrbitalDisplacement,
+  chooseXRTargetFrameRate,
   createXRViewState,
   invertMat4,
 } from "../js/xr.js";
@@ -18,6 +21,15 @@ function close(actual, expected, tolerance = EPSILON) {
     `expected ${actual} to be within ${tolerance} of ${expected}`,
   );
 }
+
+test("aggressive XR profile targets the cheapest comfortable Quest refresh", () => {
+  assert.equal(XR_FRAMEBUFFER_SCALE, 0.42);
+  assert.deepEqual(XR_QUALITY_PROFILE, { maxSteps: 112, baseStep: 0.14 });
+  assert.equal(chooseXRTargetFrameRate([60, 72, 80, 90, 120]), 72);
+  assert.equal(chooseXRTargetFrameRate(new Float32Array([60, 80, 90])), 80);
+  assert.equal(chooseXRTargetFrameRate([60]), null);
+  assert.equal(chooseXRTargetFrameRate(undefined), null);
+});
 
 test("orbital displacement follows a black-hole-centered constant-radius arc", () => {
   const position = new Float32Array([0, 1.35, 13.5]);

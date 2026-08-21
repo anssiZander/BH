@@ -22,9 +22,12 @@ test("WebXR renderer uses direct per-eye projection and the reduced shader", asy
   assert.match(renderer, /makeXRCompatible/);
   assert.match(renderer, /new window\.XRWebGLLayer/);
   assert.match(renderer, /renderXR\(viewStates/);
+  assert.match(renderer, /fixedFoveation\s*=\s*0\.65/);
   assert.match(shader, /uInverseProjection/);
   assert.match(shader, /uEyeRotation/);
   assert.match(shader, /PHOTON_RHO/);
+  assert.match(shader, /SKY_BRIGHTNESS\s*=\s*0\.5/);
+  assert.match(shader, /if \(uXRView\) \{[\s\S]*one field evaluation/);
   assert.doesNotMatch(shader, /orbital_station\.glsl/);
 });
 

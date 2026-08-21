@@ -2,15 +2,16 @@ import {
   FirstPersonCamera,
   arealToIsotropic,
   isotropicToAreal,
-} from "./camera.js?v=20260818-webxr-v1";
-import { SchwarzschildRenderer } from "./webgl.js?v=20260818-webxr-v1";
+} from "./camera.js?v=20260821-vr-fast-v2";
+import { SchwarzschildRenderer } from "./webgl.js?v=20260821-vr-fast-v2";
 import {
   BlackHoleXRRig,
   QuestControllerInput,
   XR_FRAMEBUFFER_SCALE,
   XR_QUALITY_PROFILE,
+  chooseXRTargetFrameRate,
   createXRViewState,
-} from "./xr.js?v=20260818-webxr-v1";
+} from "./xr.js?v=20260821-vr-fast-v2";
 
 const QUALITY_PROFILES = {
   low: { maxSteps: 256, scale: 0.52, maxPixels: 750_000 },
@@ -113,6 +114,11 @@ let xrLastFrameTime = Number.NaN;
 let xrFrameRequestId = 0;
 let xrControllerCount = -1;
 let xrImmersiveSupported = null;
+let xrTargetFrameRate = 72;
+let xrPerformanceWindowStart = Number.NaN;
+let xrPerformanceFrameCount = 0;
+let xrSlowFrameCount = 0;
+let xrLastPerformanceSummary = "";
 const xrRig = new BlackHoleXRRig();
 const xrControllerInput = new QuestControllerInput();
 
@@ -246,9 +252,9 @@ function updateTelemetry(now) {
   const radius = xrSession ? xrRig.arealRadius : camera.arealRadius;
   radiusValue.textContent = `${radius.toFixed(radius < 10 ? 3 : 2)} M`;
   fpsValue.textContent = `${Math.round(smoothedFps)} FPS`;
-  stepValue.textContent = `${
-    xrSession ? XR_QUALITY_PROFILE.maxSteps : settings.maxSteps
-  } RK2`;
+  stepValue.textContent = xrSession
+    ? `${XR_QUALITY_PROFILE.maxSteps} FAST`
+    : `${settings.maxSteps} RK2`;
 
   radiusMarker.style.left = `${arealRadiusToTrackPercent(radius)}%`;
 
@@ -675,6 +681,55 @@ function setVrStatus(message) {
   vrStatus.textContent = message;
 }
 
+function resetXRPerformanceTelemetry() {
+  xrPerformanceWindowStart = Number.NaN;
+  xrPerformanceFrameCount = 0;
+  xrSlowFrameCount = 0;
+}
+
+async function preferComfortableXRFrameRate(session) {
+  const target = chooseXRTargetFrameRate(session.supportedFrameRates);
+  if (target && typeof session.updateTargetFrameRate === "function") {
+    try {
+      await session.updateTargetFrameRate(target);
+      return target;
+    } catch (error) {
+      console.warn(`Quest refresh-rate request was declined: ${error}`);
+    }
+  }
+  return Number(session.frameRate) || 72;
+}
+
+function updateXRPerformanceTelemetry(time, deltaSeconds) {
+  if (!Number.isFinite(xrPerformanceWindowStart)) {
+    xrPerformanceWindowStart = time;
+    return;
+  }
+
+  xrPerformanceFrameCount += 1;
+  if (deltaSeconds >= 1.18 / Math.max(xrTargetFrameRate, 1)) {
+    xrSlowFrameCount += 1;
+  }
+
+  const elapsed = time - xrPerformanceWindowStart;
+  if (elapsed < 1000) return;
+  const appFps = xrPerformanceFrameCount * 1000 / Math.max(elapsed, 1);
+  const slowPercent = xrPerformanceFrameCount > 0
+    ? 100 * xrSlowFrameCount / xrPerformanceFrameCount
+    : 0;
+  const stats = renderer?.xrFrameStats;
+  const eyeSize = stats?.viewCount
+    ? ` · ${stats.maxWidth}×${stats.maxHeight}/eye`
+    : "";
+  xrLastPerformanceSummary =
+    `${Math.round(xrTargetFrameRate)} Hz target · ${Math.round(appFps)} app fps${eyeSize}`
+    + ` · ${Math.round(slowPercent)}% slow · ${XR_QUALITY_PROFILE.maxSteps} fast steps`;
+  setVrStatus(xrLastPerformanceSummary);
+  xrPerformanceWindowStart = time;
+  xrPerformanceFrameCount = 0;
+  xrSlowFrameCount = 0;
+}
+
 async function checkXRSupport() {
   if (!window.isSecureContext) {
     xrImmersiveSupported = false;
@@ -725,17 +780,24 @@ function xrRenderSettings() {
 
 function handleXRSessionEnded(endedSession) {
   if (xrSession && xrSession !== endedSession) return;
+  const performanceSummary = xrLastPerformanceSummary;
   xrSession = null;
   xrReferenceSpace = null;
   xrInitialViewerPosition = null;
   xrLastFrameTime = Number.NaN;
   xrFrameRequestId = 0;
   xrControllerCount = -1;
+  xrTargetFrameRate = 72;
+  resetXRPerformanceTelemetry();
   renderer?.finishXRSession();
   document.body.classList.remove("xr-active");
   enterVrButton.disabled = false;
   enterVrButton.textContent = "Enter Quest 3 VR";
-  setVrStatus("VR session ended · desktop view resumed");
+  setVrStatus(
+    performanceSummary
+      ? `VR ended · last sample: ${performanceSummary}`
+      : "VR session ended · desktop view resumed",
+  );
   lastFrameTime = performance.now();
   if (applicationState === "running" && renderer && !animationFrameId) {
     animationFrameId = requestAnimationFrame(animate);
@@ -775,16 +837,19 @@ async function startXRSession() {
     }
 
     xrReferenceSpace = await session.requestReferenceSpace("local");
+    xrTargetFrameRate = await preferComfortableXRFrameRate(session);
+    xrLastPerformanceSummary = "";
     xrRig.reset();
     xrRig.setSpeed(Number(document.querySelector("#speedInput").value));
     xrInitialViewerPosition = null;
     xrLastFrameTime = Number.NaN;
-    smoothedFps = Number(session.frameRate) || 72;
+    resetXRPerformanceTelemetry();
+    smoothedFps = xrTargetFrameRate;
     stopAnimation();
     document.body.classList.add("xr-active");
     enterVrButton.disabled = false;
     enterVrButton.textContent = "Exit VR";
-    const refresh = Number(session.frameRate);
+    const refresh = xrTargetFrameRate;
     setVrStatus(
       refresh > 0
         ? `Quest 3 active at ${Math.round(refresh)} Hz · A/X resets position`
@@ -863,6 +928,7 @@ function onXRFrame(time, frame) {
       const instantaneousFps = 1 / Math.max(deltaSeconds, 1 / 240);
       smoothedFps += (instantaneousFps - smoothedFps) * 0.055;
     }
+    updateXRPerformanceTelemetry(time, deltaSeconds);
     updateTelemetry(time);
     stableFrameCount += 1;
     if (stableFrameCount === STABLE_FRAMES_BEFORE_RECOVERY_CLEAR) {

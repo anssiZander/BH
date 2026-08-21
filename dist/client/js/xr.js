@@ -6,11 +6,19 @@ const MOVE_DECELERATION_RESPONSE = 6.5;
 const CONTROLLER_DEADZONE = 0.14;
 
 export const XR_METERS_TO_M = 0.24;
-export const XR_FRAMEBUFFER_SCALE = 0.65;
+export const XR_FRAMEBUFFER_SCALE = 0.42;
 export const XR_QUALITY_PROFILE = Object.freeze({
-  maxSteps: 224,
-  baseStep: 0.1,
+  maxSteps: 112,
+  baseStep: 0.14,
 });
+
+export function chooseXRTargetFrameRate(supportedFrameRates) {
+  const rates = Array.from(supportedFrameRates || [])
+    .map(Number)
+    .filter((rate) => Number.isFinite(rate) && rate >= 72)
+    .sort((left, right) => left - right);
+  return rates[0] ?? null;
+}
 
 function normalize(out, x, y, z) {
   const length = Math.hypot(x, y, z) || 1;

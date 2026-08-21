@@ -78,34 +78,42 @@ the same physical pair; those are repeated optical images, not extra bands.
 
 The sky is the complete locally stored 6000 x 3000 ESO/S. Brunier panorama.
 On a capable desktop GPU it is uploaded at full resolution with mipmapping.
+Its linear brightness is reduced to 50% in this branch; the source texture is
+not downsampled.
 
 ## Rendering path and performance
 
-Each pixel launches a three-dimensional ray through the isotropic
+Each desktop pixel launches a three-dimensional ray through the isotropic
 Schwarzschild optical geometry and advances it with midpoint/RK2 integration.
 Step length shrinks near the horizon and photon sphere. Segment/sphere roots
 detect band crossings without running the former station distance field.
 
-Desktop quality remains adjustable. VR currently uses a fixed conservative
-profile of 224 RK2 steps, a `0.10M` base step, a 0.65 WebXR framebuffer scale,
-and moderate fixed foveation when the runtime exposes it. Each eye uses its own
-asymmetric WebXR projection and pose. VR bypasses the desktop temporal and
-reconstruction passes to keep latency and framebuffer cost down.
+VR now uses an intentionally aggressive playability profile: at most 112 fast
+steps, a `0.14M` base step, a 0.42 WebXR framebuffer scale, a larger minimum
+step near the photon sphere, and 0.65 fixed foveation when the runtime exposes
+it. Its integrator evaluates the optical field once per step instead of twice.
+Each eye still receives its own asymmetric WebXR projection and pose, and VR
+still bypasses the desktop temporal and reconstruction passes.
 
-These defaults are starting values, not a guarantee of 72 or 90 Hz. Near-
-critical rays remain the worst case, and performance still needs measurement
-inside the Quest 3 before increasing resolution or ray count.
+Relative to the first Quest build, the scale and step cap reduce nominal
+pixel-step work to about 21% before accounting for the cheaper integrator and
+stronger foveation. The app asks for the lowest supported refresh rate at or
+above 72 Hz and reports measured app-frame rate, slow-frame percentage, and
+the actual runtime viewport size once per second. WebXR runtimes may clamp or
+ignore the scale, foveation, or refresh request, so those numbers are evidence
+of what was negotiated rather than promises of smooth playback.
 
 ## Scope and limitations
 
 - Light propagation is an educational real-time approximation, not a precision
-  general-relativity solver.
+  general-relativity solver. The VR-only fast integrator deliberately trades
+  additional accuracy for latency.
 - User locomotion is Euclidean; it is not a massive-particle geodesic.
 - The camera is clamped outside the horizon and there is no modeled interior.
 - The double band is an illustrative surface treatment, not a structural model.
 - The sky is treated as infinitely distant once a ray escapes the strong field.
-- A desktop browser render has been verified. The first headset session and
-  sustained Quest frame timing still require an attached Quest 3.
+- The first headset session entered VR, but it was laggy and jagged under head
+  motion. This aggressive profile still requires a physical Quest 3 re-test.
 
 See [ASSET_SOURCE.md](ASSET_SOURCE.md) for attribution and
 [VALIDATION.md](VALIDATION.md) for the exact checks and remaining headset gate.

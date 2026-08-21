@@ -38,6 +38,7 @@ const float CAPTURE_RHO = 0.515;
 const float PHOTON_RHO = 1.8660254037844386;
 const float CRITICAL_IMPACT = 5.196152422706632;
 const float ESCAPE_RHO = 36.0;
+const float SKY_BRIGHTNESS = 0.5;
 const int HARD_MAX_STEPS = 896;
 
 const float BAND_LATITUDE = 0.1875;
@@ -74,7 +75,8 @@ float adaptiveStep(vec3 point) {
     // intersected analytically, so no expensive distance-field refinement is
     // required here.
     float photonBlend = smoothstep(0.0, 0.30, abs(rho - PHOTON_RHO));
-    rayStep = min(rayStep, mix(0.018, rayStep, photonBlend));
+    float photonMinimum = uXRView ? 0.034 : 0.018;
+    rayStep = min(rayStep, mix(photonMinimum, rayStep, photonBlend));
     return rayStep;
 }
 
@@ -320,21 +322,34 @@ void main() {
 
         vec3 oldPosition = position;
         if (uLensing) {
-            vec3 firstAcceleration = opticalAcceleration(position, tangent);
-            vec3 midpointTangent = normalize(
-                tangent + 0.5 * rayStep * firstAcceleration
-            );
-            vec3 midpointPosition = position + 0.5 * rayStep * tangent;
-            if (length(midpointPosition) <= CAPTURE_RHO) {
-                captured = true;
-                break;
+            if (uXRView) {
+                // Playability-first XR path: one field evaluation instead of
+                // the desktop midpoint method's two evaluations per step.
+                vec3 acceleration = opticalAcceleration(position, tangent);
+                vec3 midpointTangent = normalize(
+                    tangent + 0.5 * rayStep * acceleration
+                );
+                position += rayStep * midpointTangent;
+                tangent = normalize(tangent + rayStep * acceleration);
+            } else {
+                vec3 firstAcceleration = opticalAcceleration(position, tangent);
+                vec3 midpointTangent = normalize(
+                    tangent + 0.5 * rayStep * firstAcceleration
+                );
+                vec3 midpointPosition = position + 0.5 * rayStep * tangent;
+                if (length(midpointPosition) <= CAPTURE_RHO) {
+                    captured = true;
+                    break;
+                }
+                vec3 midpointAcceleration = opticalAcceleration(
+                    midpointPosition,
+                    midpointTangent
+                );
+                position += rayStep * midpointTangent;
+                tangent = normalize(
+                    tangent + rayStep * midpointAcceleration
+                );
             }
-            vec3 midpointAcceleration = opticalAcceleration(
-                midpointPosition,
-                midpointTangent
-            );
-            position += rayStep * midpointTangent;
-            tangent = normalize(tangent + rayStep * midpointAcceleration);
         } else {
             position += rayStep * tangent;
         }
@@ -408,6 +423,7 @@ void main() {
     vec3 sampledSky = uSkyVisible
         ? textureLod(uSky, skyUv, min(skyLod * 0.55, 1.6)).rgb
         : vec3(0.0);
+    sampledSky *= SKY_BRIGHTNESS;
 
     vec3 sceneColor = vec3(0.0);
     if (!captured && !invalidRay) {
