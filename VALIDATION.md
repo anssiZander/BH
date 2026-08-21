@@ -76,3 +76,39 @@ headset re-test below.
 5. Check comfort during orbiting and note whether Quest Link or Air Link is used.
 
 Desktop browser and automated results cannot substitute for this headset pass.
+
+## 21 August 2026: fixed-position stereo lookup build
+
+The physical Quest re-test found the 112-step aggressive live renderer still
+very laggy and hardly better than the original 224-step build. This diagnostic
+therefore removes live ray integration from immersive rendering entirely.
+
+- VR center fixed at Schwarzschild areal radius `r = 3.25M`.
+- Controller locomotion disabled; head rotation, eye separation, and small
+  tracked translations retained.
+- Offline table dimensions: 4096 ray-angle samples by 35 isotropic-radius
+  samples, spanning `rho = 1.96M` through `2.30M`.
+- Each table entry stores the escaped sky direction or capture state plus the
+  first photon-sphere crossing and tangent for the double band.
+- The dedicated XR shader performs no integration loop and no optical-force
+  evaluation. It reconstructs the result separately from each WebXR eye pose.
+- Full 6000 x 3000 sky retained and linear sky brightness remains multiplied
+  by 0.5.
+- Framebuffer scale 0.42 and requested fixed foveation 0.65 retained so this
+  test isolates the cost of ray integration as strongly as practical.
+
+The generated binary validates its magic, dimensions, layer count, byte size,
+finite payload, captured/escaped populations, radial invariants, and normalized
+photon-sphere crossing. Automated tests also verify distinct left/right eye
+positions and source/distribution byte equality. Physical Quest timing remains
+the acceptance gate.
+
+Automated result for this build:
+
+- `npm run generate:xr-lut` reproduced SHA-256
+  `20B3ECEB667800711FC2FF94222046F4DCAB3381F77B2DCB88889BCD8C4D5D38`.
+- `npm test`: 8 passed, 0 failed.
+- A local static-server check returned HTTP 200 for the entry page, three
+  JavaScript modules, XR shader, full sky image, and 4,587,584-byte table.
+- No automated check substitutes for compiling and timing the shader through
+  the user's actual Quest 3 and PC-VR runtime.

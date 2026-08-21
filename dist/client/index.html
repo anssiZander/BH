@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="A Quest 3 PC-VR Schwarzschild optics simulation with controller locomotion and a simplified photon-sphere double band."
+      content="A fixed-position Quest 3 PC-VR Schwarzschild view with stereo ray-transfer lookup and a photon-sphere double band."
     />
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Schwarzschild Field VR" />
     <meta
       property="og:description"
-      content="Enter a PC-VR Schwarzschild field, fly with Quest Touch controllers, and inspect a double band at the photon sphere."
+      content="Enter a fixed PC-VR Schwarzschild viewpoint with head-tracked stereo and inspect a double band at the photon sphere."
     />
     <meta
       property="og:image"
@@ -36,7 +36,7 @@
     <meta name="theme-color" content="#03040b" />
     <link rel="icon" href="data:," />
     <title>Schwarzschild Field VR</title>
-    <link rel="stylesheet" href="styles.css?v=20260821-vr-fast-v2" />
+    <link rel="stylesheet" href="styles.css?v=20260821-vr-lut-v3" />
   </head>
   <body>
     <main class="app-shell">
@@ -46,7 +46,7 @@
       <div class="crosshair" aria-hidden="true"><span></span><span></span></div>
 
       <header class="brand-panel glass-panel">
-        <div class="eyebrow"><span class="live-dot"></span> LIVE OPTICAL INTEGRATION</div>
+        <div class="eyebrow"><span class="live-dot"></span> SCHWARZSCHILD OPTICAL FIELD</div>
         <h1>Schwarzschild <span>Field</span></h1>
         <div class="telemetry-row">
           <div>
@@ -58,7 +58,7 @@
             <strong id="fpsValue">—</strong>
           </div>
           <div>
-            <span class="metric-label">RAY BUDGET</span>
+            <span class="metric-label">RAY MODE</span>
             <strong id="stepValue">—</strong>
           </div>
         </div>
@@ -165,11 +165,11 @@
           <div><span class="mouse-symbol">MOUSE</span><em>look</em></div>
         </div>
         <div class="xr-guide">
-          <strong>QUEST TOUCH</strong>
-          <span>Left stick · radial / orbit</span>
-          <span>Right stick · polar up / down</span>
-          <span>Grip · boost</span>
-          <span>A or X · reset position</span>
+          <strong>FIXED VR VIEW</strong>
+          <span>Position · r = 3.25M</span>
+          <span>Head rotation · fully tracked</span>
+          <span>Both eyes · independent ray transfer</span>
+          <span>Controllers · disabled for this test</span>
         </div>
         <p id="pointerHint">Click the field to capture the pointer</p>
         <a
@@ -190,7 +190,7 @@
           <span></span><span></span><span></span>
         </div>
         <p>CALIBRATING NULL GEODESICS</p>
-        <small id="loadingDetail">Fetching the VR shader and spherical sky field…</small>
+        <small id="loadingDetail">Fetching the stereo ray table and spherical sky field…</small>
       </div>
 
       <div id="fatalError" class="fatal-error glass-panel" hidden>
@@ -205,7 +205,7 @@
 
     <script
       type="module"
-      src="js/main.js?v=20260821-vr-fast-v2"
+      src="js/main.js?v=20260821-vr-lut-v3"
     ></script>
   </body>
 </html>

@@ -2,18 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BlackHoleXRRig,
-  QuestControllerInput,
+  FixedBlackHoleXRRig,
+  XR_FIXED_AREAL_RADIUS,
+  XR_FIXED_ISOTROPIC_RADIUS,
   XR_FRAMEBUFFER_SCALE,
   XR_METERS_TO_M,
-  XR_QUALITY_PROFILE,
-  applyOrbitalDisplacement,
   chooseXRTargetFrameRate,
   createXRViewState,
   invertMat4,
+  isotropicToAreal,
 } from "../js/xr.js";
 
 const EPSILON = 1e-5;
+const IDENTITY = new Float32Array([
+  1, 0, 0, 0,
+  0, 1, 0, 0,
+  0, 0, 1, 0,
+  0, 0, 0, 1,
+]);
 
 function close(actual, expected, tolerance = EPSILON) {
   assert.ok(
@@ -22,129 +28,80 @@ function close(actual, expected, tolerance = EPSILON) {
   );
 }
 
-test("aggressive XR profile targets the cheapest comfortable Quest refresh", () => {
+function viewAt(x, y = 0, z = 0) {
+  return {
+    transform: {
+      position: { x, y, z },
+      matrix: IDENTITY,
+    },
+    projectionMatrix: IDENTITY,
+  };
+}
+
+test("fixed XR profile starts just outside the photon sphere at 72 Hz", () => {
   assert.equal(XR_FRAMEBUFFER_SCALE, 0.42);
-  assert.deepEqual(XR_QUALITY_PROFILE, { maxSteps: 112, baseStep: 0.14 });
+  close(isotropicToAreal(XR_FIXED_ISOTROPIC_RADIUS), XR_FIXED_AREAL_RADIUS);
+  assert.equal(XR_FIXED_AREAL_RADIUS, 3.25);
   assert.equal(chooseXRTargetFrameRate([60, 72, 80, 90, 120]), 72);
   assert.equal(chooseXRTargetFrameRate(new Float32Array([60, 80, 90])), 80);
   assert.equal(chooseXRTargetFrameRate([60]), null);
-  assert.equal(chooseXRTargetFrameRate(undefined), null);
 });
 
-test("orbital displacement follows a black-hole-centered constant-radius arc", () => {
-  const position = new Float32Array([0, 1.35, 13.5]);
-  const tangent = new Float32Array([-1, 0, 0]);
-  const displacement = new Float32Array([-1, 0, 0]);
-  const before = Math.hypot(position[0], position[2]);
-
-  const angle = applyOrbitalDisplacement(
-    position,
-    position,
-    displacement,
-    tangent,
-  );
-
-  close(angle, 1 / 13.5);
-  close(Math.hypot(position[0], position[2]), before);
-  close(position[1], 1.35);
-  assert.ok(position[0] < 0);
-});
-
-test("Quest Touch xr-standard mappings expose locomotion, boost, and edge reset", () => {
-  const input = new QuestControllerInput();
-  const left = {
-    handedness: "left",
-    gamepad: {
-      axes: [0, 0, 0.55, -1],
-      buttons: [{}, { pressed: true }, {}, {}, { pressed: true }],
-    },
-  };
-  const right = {
-    handedness: "right",
-    gamepad: {
-      axes: [0, 0, 0, -0.55],
-      buttons: [],
-    },
-  };
-
-  const first = input.read([left, right]);
-  assert.equal(first.controllers, 2);
-  assert.ok(first.radial > 0.99);
-  assert.ok(first.angular > 0);
-  assert.ok(first.polar > 0);
-  assert.equal(first.boost, true);
-  assert.equal(first.reset, true);
-  assert.equal(input.read([left, right]).reset, false);
-  assert.equal(input.read([]).reset, false);
-  assert.equal(input.read([left]).reset, true);
-});
-
-test("XR rig preserves radius while orbiting and moves radially toward the hole", () => {
-  const rig = new BlackHoleXRRig();
-  const initialRadius = Math.hypot(...rig.position);
-  const initialHorizontalRadius = Math.hypot(rig.position[0], rig.position[2]);
-
-  for (let frame = 0; frame < 30; frame += 1) {
-    rig.update(1 / 72, {
-      angular: 1,
-      polar: 0,
-      radial: 0,
-      boost: false,
-      reset: false,
-    });
-  }
-
-  close(
-    Math.hypot(rig.position[0], rig.position[2]),
-    initialHorizontalRadius,
-    2e-4,
-  );
-  close(rig.position[1], 1.35, 2e-4);
-  assert.ok(rig.orientation > 0);
-
+test("fixed XR rig cannot drift away from its lookup-table position", () => {
+  const rig = new FixedBlackHoleXRRig();
+  assert.deepEqual([...rig.position.slice(0, 2)], [0, 0]);
+  close(rig.position[2], XR_FIXED_ISOTROPIC_RADIUS);
+  close(rig.arealRadius, XR_FIXED_AREAL_RADIUS);
+  rig.position.set([1, 2, 3]);
   rig.reset();
-  for (let frame = 0; frame < 30; frame += 1) {
-    rig.update(1 / 72, {
-      angular: 0,
-      polar: 0,
-      radial: 1,
-      boost: false,
-      reset: false,
-    });
-  }
-  assert.ok(Math.hypot(...rig.position) < initialRadius);
+  close(rig.position[0], 0);
+  close(rig.position[1], 0);
+  close(rig.position[2], XR_FIXED_ISOTROPIC_RADIUS);
 });
 
-test("XR view conversion keeps stereo offset and headset basis", () => {
-  const identity = new Float32Array([
-    1, 0, 0, 0,
-    0, 1, 0, 0,
-    0, 0, 1, 0,
-    0, 0, 0, 1,
-  ]);
-  assert.deepEqual([...invertMat4(identity)], [...identity]);
-
-  const rig = new BlackHoleXRRig();
-  const view = {
-    transform: {
-      position: { x: 0.032, y: 0, z: 0 },
-      matrix: identity,
-    },
-    projectionMatrix: identity,
-  };
-  const state = createXRViewState(
-    view,
-    { x: 0, y: 0, z: 0 },
+test("each WebXR eye keeps an independent physical stereo position", () => {
+  assert.deepEqual([...invertMat4(IDENTITY)], [...IDENTITY]);
+  const rig = new FixedBlackHoleXRRig();
+  const initialViewerPosition = { x: 0, y: 0, z: 0 };
+  const left = createXRViewState(
+    viewAt(-0.032),
+    initialViewerPosition,
+    rig,
+  );
+  const right = createXRViewState(
+    viewAt(0.032),
+    initialViewerPosition,
     rig,
   );
 
-  close(state.position[0], 0.032 * XR_METERS_TO_M);
-  close(state.position[1], rig.position[1]);
-  close(state.position[2], rig.position[2]);
-  assert.deepEqual([...state.right], [1, 0, 0]);
-  assert.deepEqual([...state.up], [0, 1, 0]);
-  close(state.forward[0], 0);
-  close(state.forward[1], 0);
-  close(state.forward[2], -1);
-  close(state.fovY, Math.PI / 2);
+  close(left.position[0], -0.032 * XR_METERS_TO_M);
+  close(right.position[0], 0.032 * XR_METERS_TO_M);
+  close(
+    right.position[0] - left.position[0],
+    0.064 * XR_METERS_TO_M,
+  );
+  close(left.position[2], XR_FIXED_ISOTROPIC_RADIUS);
+  close(right.position[2], XR_FIXED_ISOTROPIC_RADIUS);
+  assert.notEqual(left.position, right.position);
+  assert.deepEqual([...right.right], [1, 0, 0]);
+  assert.deepEqual([...right.up], [0, 1, 0]);
+  close(right.forward[0], 0);
+  close(right.forward[1], 0);
+  close(right.forward[2], -1);
+  close(right.fovY, Math.PI / 2);
+});
+
+test("small tracked head translations remain live around the fixed center", () => {
+  const rig = new FixedBlackHoleXRRig();
+  const state = createXRViewState(
+    viewAt(0.05, 0.12, -0.08),
+    { x: 0, y: 0, z: 0 },
+    rig,
+  );
+  close(state.position[0], 0.05 * XR_METERS_TO_M);
+  close(state.position[1], 0.12 * XR_METERS_TO_M);
+  close(
+    state.position[2],
+    XR_FIXED_ISOTROPIC_RADIUS - 0.08 * XR_METERS_TO_M,
+  );
 });

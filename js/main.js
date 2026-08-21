@@ -2,16 +2,15 @@ import {
   FirstPersonCamera,
   arealToIsotropic,
   isotropicToAreal,
-} from "./camera.js?v=20260821-vr-fast-v2";
-import { SchwarzschildRenderer } from "./webgl.js?v=20260821-vr-fast-v2";
+} from "./camera.js?v=20260821-vr-lut-v3";
+import { SchwarzschildRenderer } from "./webgl.js?v=20260821-vr-lut-v3";
 import {
-  BlackHoleXRRig,
-  QuestControllerInput,
+  FixedBlackHoleXRRig,
   XR_FRAMEBUFFER_SCALE,
-  XR_QUALITY_PROFILE,
+  XR_FIXED_AREAL_RADIUS,
   chooseXRTargetFrameRate,
   createXRViewState,
-} from "./xr.js?v=20260821-vr-fast-v2";
+} from "./xr.js?v=20260821-vr-lut-v3";
 
 const QUALITY_PROFILES = {
   low: { maxSteps: 256, scale: 0.52, maxPixels: 750_000 },
@@ -112,15 +111,13 @@ let xrReferenceSpace = null;
 let xrInitialViewerPosition = null;
 let xrLastFrameTime = Number.NaN;
 let xrFrameRequestId = 0;
-let xrControllerCount = -1;
 let xrImmersiveSupported = null;
 let xrTargetFrameRate = 72;
 let xrPerformanceWindowStart = Number.NaN;
 let xrPerformanceFrameCount = 0;
 let xrSlowFrameCount = 0;
 let xrLastPerformanceSummary = "";
-const xrRig = new BlackHoleXRRig();
-const xrControllerInput = new QuestControllerInput();
+const xrRig = new FixedBlackHoleXRRig();
 
 function bindRange(inputId, outputId, settingKey, format, onInput) {
   const input = document.querySelector(`#${inputId}`);
@@ -160,7 +157,6 @@ function bindControls() {
   bindRange("rayStepInput", "rayStepOutput", "baseStep", (value) => value.toFixed(3));
   bindRange("speedInput", "speedOutput", null, (value) => value.toFixed(2), (value) => {
     if (camera) camera.speed = value;
-    xrRig.setSpeed(value);
   });
   bindRange(
     "rotationSpeedInput",
@@ -253,7 +249,7 @@ function updateTelemetry(now) {
   radiusValue.textContent = `${radius.toFixed(radius < 10 ? 3 : 2)} M`;
   fpsValue.textContent = `${Math.round(smoothedFps)} FPS`;
   stepValue.textContent = xrSession
-    ? `${XR_QUALITY_PROFILE.maxSteps} FAST`
+    ? "PRECOMPUTED"
     : `${settings.maxSteps} RK2`;
 
   radiusMarker.style.left = `${arealRadiusToTrackPercent(radius)}%`;
@@ -723,7 +719,7 @@ function updateXRPerformanceTelemetry(time, deltaSeconds) {
     : "";
   xrLastPerformanceSummary =
     `${Math.round(xrTargetFrameRate)} Hz target · ${Math.round(appFps)} app fps${eyeSize}`
-    + ` · ${Math.round(slowPercent)}% slow · ${XR_QUALITY_PROFILE.maxSteps} fast steps`;
+    + ` · ${Math.round(slowPercent)}% slow · stereo LUT`;
   setVrStatus(xrLastPerformanceSummary);
   xrPerformanceWindowStart = time;
   xrPerformanceFrameCount = 0;
@@ -753,7 +749,7 @@ async function checkXRSupport() {
     enterVrButton.textContent = supported ? "Enter Quest 3 VR" : "Check Quest Link";
     setVrStatus(
       supported
-        ? "Quest Link detected · controllers: left move, right vertical"
+        ? `Quest Link detected · fixed stereo view at r = ${XR_FIXED_AREAL_RADIUS}M`
         : "Start Quest Link, connect the headset, then check again",
     );
     return supported;
@@ -770,8 +766,6 @@ async function checkXRSupport() {
 function xrRenderSettings() {
   return {
     ...settings,
-    maxSteps: XR_QUALITY_PROFILE.maxSteps,
-    baseStep: XR_QUALITY_PROFILE.baseStep,
     spheresVisible: false,
     shellCount: 0,
     photonLabelOpacity: 0,
@@ -786,7 +780,6 @@ function handleXRSessionEnded(endedSession) {
   xrInitialViewerPosition = null;
   xrLastFrameTime = Number.NaN;
   xrFrameRequestId = 0;
-  xrControllerCount = -1;
   xrTargetFrameRate = 72;
   resetXRPerformanceTelemetry();
   renderer?.finishXRSession();
@@ -840,7 +833,6 @@ async function startXRSession() {
     xrTargetFrameRate = await preferComfortableXRFrameRate(session);
     xrLastPerformanceSummary = "";
     xrRig.reset();
-    xrRig.setSpeed(Number(document.querySelector("#speedInput").value));
     xrInitialViewerPosition = null;
     xrLastFrameTime = Number.NaN;
     resetXRPerformanceTelemetry();
@@ -852,8 +844,8 @@ async function startXRSession() {
     const refresh = xrTargetFrameRate;
     setVrStatus(
       refresh > 0
-        ? `Quest 3 active at ${Math.round(refresh)} Hz · A/X resets position`
-        : "Quest 3 active · A/X resets position",
+        ? `Quest 3 active at ${Math.round(refresh)} Hz · fixed r = ${XR_FIXED_AREAL_RADIUS}M · stereo LUT`
+        : `Quest 3 active · fixed r = ${XR_FIXED_AREAL_RADIUS}M · stereo LUT`,
     );
     xrFrameRequestId = session.requestAnimationFrame(onXRFrame);
   } catch (error) {
@@ -905,17 +897,6 @@ function onXRFrame(time, frame) {
       ? Math.min((time - xrLastFrameTime) / 1000, 0.05)
       : 0;
     xrLastFrameTime = time;
-    const controllerState = xrControllerInput.read(session.inputSources);
-    xrRig.update(deltaSeconds, controllerState);
-    if (controllerState.controllers !== xrControllerCount) {
-      xrControllerCount = controllerState.controllers;
-      if (xrControllerCount < 2) {
-        setVrStatus("Quest 3 active · wake both Touch controllers");
-      } else {
-        setVrStatus("Left stick: radial/orbit · right stick: polar · grip: boost · A/X: reset");
-      }
-    }
-
     const viewStates = pose.views.map((view) =>
       createXRViewState(view, xrInitialViewerPosition, xrRig)
     );
@@ -1054,7 +1035,8 @@ async function initializeRenderer(recovering = false) {
     }
 
     loadingDetail.textContent =
-      `${renderer.textureSize.width}×${renderer.textureSize.height} sky loaded · optics stable`;
+      `${renderer.textureSize.width}×${renderer.textureSize.height} sky · `
+      + `${renderer.transferTable.width}×${renderer.transferTable.height} stereo ray table loaded`;
     applicationState = "running";
     stableFrameCount = 0;
     statusText.textContent = recovering
@@ -1082,7 +1064,6 @@ async function start() {
   camera = new FirstPersonCamera(canvas);
   bindControls();
   camera.speed = Number(document.querySelector("#speedInput").value);
-  xrRig.setSpeed(camera.speed);
   retryStartupButton.addEventListener("click", () => window.location.reload());
   canvas.addEventListener("webglcontextlost", handleContextLost, false);
   canvas.addEventListener(

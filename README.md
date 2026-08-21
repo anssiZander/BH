@@ -6,8 +6,9 @@ optical ray integration and ESO Milky Way panorama, but replaces the former
 Dyson-ring scene with one inexpensive double band at the photon sphere.
 
 This branch deliberately contains no cinematic timeline or recording system.
-It is a focused interactive prototype: stereoscopic black-hole optics, head
-tracking, and controller locomotion.
+It is a focused interactive prototype: stereoscopic black-hole optics and head
+tracking. The current VR experiment deliberately uses one fixed position just
+outside the photon sphere.
 
 ## Requirements
 
@@ -45,12 +46,11 @@ For VR:
 
 Quest Touch:
 
-- Left stick vertical: move radially toward or away from the black hole.
-- Left stick horizontal: orbit azimuthally at constant black-hole-centered radius.
-- Right stick vertical: move toward either pole.
-- Either grip: boost movement speed.
-- A or X: reset position.
-- Head movement and rotation: natural stereo view and limited room-scale offset.
+- The controllers are intentionally inactive in this fixed-position test.
+- Head rotation remains fully tracked.
+- The two eye positions and small room-scale head translations remain distinct.
+- The fixed viewpoint is at Schwarzschild areal radius `r = 3.25M`, just
+  outside the photon sphere at `r = 3M`.
 
 Desktop fallback:
 
@@ -61,8 +61,7 @@ Desktop fallback:
 - Mouse: look after clicking the field.
 - R: reset; H: hide or restore the interface; Escape: release pointer lock.
 
-Locomotion follows the same black-hole-centered basis in VR and on desktop. It
-is intentionally independent of the direction the user is looking.
+Desktop locomotion is unchanged. It is not used by the current VR path.
 
 ## What is rendered
 
@@ -83,37 +82,41 @@ not downsampled.
 
 ## Rendering path and performance
 
-Each desktop pixel launches a three-dimensional ray through the isotropic
+Each desktop pixel still launches a three-dimensional ray through the isotropic
 Schwarzschild optical geometry and advances it with midpoint/RK2 integration.
-Step length shrinks near the horizon and photon sphere. Segment/sphere roots
-detect band crossings without running the former station distance field.
+The desktop renderer therefore remains a useful live reference.
 
-VR now uses an intentionally aggressive playability profile: at most 112 fast
-steps, a `0.14M` base step, a 0.42 WebXR framebuffer scale, a larger minimum
-step near the photon sphere, and 0.65 fixed foveation when the runtime exposes
-it. Its integrator evaluates the optical field once per step instead of twice.
-Each eye still receives its own asymmetric WebXR projection and pose, and VR
-still bypasses the desktop temporal and reconstruction passes.
+The immersive renderer no longer integrates rays per pixel. An offline build
+step traces the rays into a 4096 by 35 floating-point transfer table spanning
+the small range of isotropic radii reachable by eye separation and normal head
+lean around the fixed `r = 3.25M` center. For each WebXR eye, the shader uses
+that eye's real pose and asymmetric projection to obtain an initial world ray.
+Spherical symmetry reduces the lookup to camera radius and radial ray angle;
+the shader then reconstructs the outgoing star direction and photon-sphere
+crossing in that eye's own black-hole-centered plane. This preserves genuine
+stereo disparity rather than displaying a flat baked panorama.
 
-Relative to the first Quest build, the scale and step cap reduce nominal
-pixel-step work to about 21% before accounting for the cheaper integrator and
-stronger foveation. The app asks for the lowest supported refresh rate at or
-above 72 Hz and reports measured app-frame rate, slow-frame percentage, and
-the actual runtime viewport size once per second. WebXR runtimes may clamp or
-ignore the scale, foveation, or refresh request, so those numbers are evidence
-of what was negotiated rather than promises of smooth playback.
+The XR fragment shader contains no ray loop and no optical-force evaluation.
+Its main work is two nearest-neighbor float-table reads, one sky lookup, and
+optional double-band shading. The conservative 0.42 framebuffer scale and 0.65
+requested foveation are retained for this first diagnostic. The app requests
+the lowest supported refresh rate at or above 72 Hz and reports app FPS,
+slow-frame percentage, and actual per-eye viewport once per second. The last
+sample remains visible after exiting VR.
 
 ## Scope and limitations
 
-- Light propagation is an educational real-time approximation, not a precision
-  general-relativity solver. The VR-only fast integrator deliberately trades
-  additional accuracy for latency.
-- User locomotion is Euclidean; it is not a massive-particle geodesic.
+- Light propagation is an educational approximation, not a precision
+  general-relativity solver. The fixed VR table is finite and nearest-sampled,
+  so the thinnest near-critical images can alias.
+- VR controller locomotion is disabled. The lookup clamps head motion outside
+  its precomputed radial interval rather than supporting free flight.
 - The camera is clamped outside the horizon and there is no modeled interior.
 - The double band is an illustrative surface treatment, not a structural model.
 - The sky is treated as infinitely distant once a ray escapes the strong field.
-- The first headset session entered VR, but it was laggy and jagged under head
-  motion. This aggressive profile still requires a physical Quest 3 re-test.
+- Both live-integration headset profiles entered VR but remained very laggy.
+  The lookup-table build still requires a physical Quest 3 re-test; if it is
+  also slow, the dominant problem is probably outside the ray integrator.
 
 See [ASSET_SOURCE.md](ASSET_SOURCE.md) for attribution and
 [VALIDATION.md](VALIDATION.md) for the exact checks and remaining headset gate.

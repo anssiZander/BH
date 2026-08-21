@@ -1,14 +1,19 @@
-const RUNTIME_ASSET_VERSION = "20260821-vr-fast-v2";
+const RUNTIME_ASSET_VERSION = "20260821-vr-lut-v3";
 const runtimeAsset = (path) => `${path}?v=${RUNTIME_ASSET_VERSION}`;
 
 const SHADER_PATHS = {
   vertex: runtimeAsset("shaders/fullscreen.vert"),
   fragment: runtimeAsset("shaders/schwarzschild-vr.frag"),
+  xrFragment: runtimeAsset("shaders/schwarzschild-lut-xr.frag"),
   fxaa: runtimeAsset("shaders/fxaa.frag"),
   rcas: runtimeAsset("shaders/rcas.frag"),
 };
 
 const SKY_TEXTURE_PATH = runtimeAsset("assets/galaxy_4k.jpg");
+const XR_TRANSFER_TABLE_PATH = runtimeAsset(
+  "assets/schwarzschild-transfer-v1.bin",
+);
+const TRANSFER_HEADER_BYTES = 64;
 const MAX_HISTORY_FRAME_GAP = 0.12;
 const TEMPORAL_HISTORY_WEIGHT = 0.9;
 const RCAS_SHARPNESS = 0.18;
@@ -78,6 +83,16 @@ async function fetchText(url, onRetry) {
       throw new Error(`The server returned HTTP ${response.status}.`);
     }
     return response.text();
+  }, onRetry);
+}
+
+async function fetchArrayBuffer(url, onRetry) {
+  return retryAsset(url, async () => {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`The server returned HTTP ${response.status}.`);
+    }
+    return response.arrayBuffer();
   }, onRetry);
 }
 
@@ -163,6 +178,85 @@ function createSkyTexture(gl, image) {
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.bindTexture(gl.TEXTURE_2D, null);
   return { texture, width, height };
+}
+
+function createFloatLookupTexture(gl, width, height, data) {
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA32F,
+    width,
+    height,
+    0,
+    gl.RGBA,
+    gl.FLOAT,
+    data,
+  );
+  const error = gl.getError();
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  if (error !== gl.NO_ERROR) {
+    gl.deleteTexture(texture);
+    throw new Error(`Could not upload the XR transfer table (WebGL error ${error}).`);
+  }
+  return texture;
+}
+
+function createTransferTable(gl, buffer) {
+  if (!(buffer instanceof ArrayBuffer) || buffer.byteLength < TRANSFER_HEADER_BYTES) {
+    throw new Error("The XR transfer table was missing or truncated.");
+  }
+  const magic = String.fromCharCode(
+    ...new Uint8Array(buffer, 0, 7),
+  );
+  const header = new DataView(buffer, 0, TRANSFER_HEADER_BYTES);
+  const version = header.getUint32(8, true);
+  const width = header.getUint32(12, true);
+  const height = header.getUint32(16, true);
+  const channels = header.getUint32(20, true);
+  const rhoMin = header.getFloat32(24, true);
+  const rhoMax = header.getFloat32(28, true);
+  const photonRho = header.getFloat32(32, true);
+  const fixedArealRadius = header.getFloat32(36, true);
+  const layers = header.getUint32(40, true);
+  const maximumTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  const layerFloatCount = width * height * channels;
+  const expectedBytes =
+    TRANSFER_HEADER_BYTES
+    + layerFloatCount * layers * Float32Array.BYTES_PER_ELEMENT;
+  if (
+    magic !== "SLUTVR1"
+    || version !== 1
+    || width < 2
+    || height < 2
+    || width > maximumTextureSize
+    || height > maximumTextureSize
+    || channels !== 4
+    || layers !== 2
+    || expectedBytes !== buffer.byteLength
+    || !(rhoMin > 0 && rhoMax > rhoMin)
+  ) {
+    throw new Error("The XR transfer table header did not match this renderer.");
+  }
+
+  const payload = new Float32Array(buffer, TRANSFER_HEADER_BYTES);
+  const transfer = payload.subarray(0, layerFloatCount);
+  const crossing = payload.subarray(layerFloatCount, layerFloatCount * 2);
+  return {
+    transferTexture: createFloatLookupTexture(gl, width, height, transfer),
+    crossingTexture: createFloatLookupTexture(gl, width, height, crossing),
+    width,
+    height,
+    rhoMin,
+    rhoMax,
+    photonRho,
+    fixedArealRadius,
+  };
 }
 
 function createColorTarget(gl) {
@@ -333,35 +427,49 @@ export class SchwarzschildRenderer {
     const [
       vertexSource,
       fragmentSource,
+      xrFragmentSource,
       fxaaSource,
       rcasSource,
     ] = await Promise.all([
       fetchText(SHADER_PATHS.vertex, onProgress),
       fetchText(SHADER_PATHS.fragment, onProgress),
+      fetchText(SHADER_PATHS.xrFragment, onProgress),
       fetchText(SHADER_PATHS.fxaa, onProgress),
       fetchText(SHADER_PATHS.rcas, onProgress),
     ]);
 
     const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
     const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+    const xrFragmentShader = compileShader(
+      gl,
+      gl.FRAGMENT_SHADER,
+      xrFragmentSource,
+    );
     const fxaaShader = compileShader(gl, gl.FRAGMENT_SHADER, fxaaSource);
     const rcasShader = compileShader(gl, gl.FRAGMENT_SHADER, rcasSource);
     const program = linkProgram(gl, vertexShader, fragmentShader);
+    const xrProgram = linkProgram(gl, vertexShader, xrFragmentShader);
     const fxaaProgram = linkProgram(gl, vertexShader, fxaaShader);
     const rcasProgram = linkProgram(gl, vertexShader, rcasShader);
     gl.deleteShader(vertexShader);
     gl.deleteShader(fragmentShader);
+    gl.deleteShader(xrFragmentShader);
     gl.deleteShader(fxaaShader);
     gl.deleteShader(rcasShader);
 
-    onProgress("Decoding and fitting the spherical sky field…");
-    const skyImage = await loadImage(SKY_TEXTURE_PATH, onProgress);
+    onProgress("Loading the sky and precomputed stereo ray transfer…");
+    const [skyImage, transferBuffer] = await Promise.all([
+      loadImage(SKY_TEXTURE_PATH, onProgress),
+      fetchArrayBuffer(XR_TRANSFER_TABLE_PATH, onProgress),
+    ]);
     const skyTexture = createSkyTexture(gl, skyImage);
+    const transferTable = createTransferTable(gl, transferBuffer);
 
     return new SchwarzschildRenderer(
       canvas,
       gl,
       program,
+      xrProgram,
       fxaaProgram,
       rcasProgram,
       skyTexture.texture,
@@ -369,6 +477,7 @@ export class SchwarzschildRenderer {
         width: skyTexture.width,
         height: skyTexture.height,
       },
+      transferTable,
     );
   }
 
@@ -376,24 +485,29 @@ export class SchwarzschildRenderer {
     canvas,
     gl,
     program,
+    xrProgram,
     fxaaProgram,
     rcasProgram,
     skyTexture,
     textureSize,
+    transferTable,
   ) {
     this.canvas = canvas;
     this.gl = gl;
     this.program = program;
+    this.xrProgram = xrProgram;
     this.fxaaProgram = fxaaProgram;
     this.rcasProgram = rcasProgram;
     this.skyTexture = skyTexture;
     this.textureSize = textureSize;
+    this.transferTable = transferTable;
     this.renderScale = 0.86;
     this.maxPixels = 2_000_000;
     this.lastCssWidth = 0;
     this.lastCssHeight = 0;
     this.lastDpr = 0;
     this.uniforms = {};
+    this.xrUniforms = {};
     this.fxaaUniforms = {};
     this.rcasUniforms = {};
     this.sceneTarget = createSceneTarget(gl);
@@ -452,6 +566,26 @@ export class SchwarzschildRenderer {
       this.uniforms[name] = gl.getUniformLocation(program, name);
     }
     for (const name of [
+      "uResolution",
+      "uCameraPosition",
+      "uTime",
+      "uStationRotationSpeed",
+      "uFovY",
+      "uLensing",
+      "uSkyVisible",
+      "uRingsVisible",
+      "uExposure",
+      "uSaturation",
+      "uSky",
+      "uRayTransfer",
+      "uPhotonCrossing",
+      "uTransferRhoRange",
+      "uInverseProjection",
+      "uEyeRotation",
+    ]) {
+      this.xrUniforms[name] = gl.getUniformLocation(xrProgram, name);
+    }
+    for (const name of [
       "uCurrentFrame",
       "uHistoryFrame",
       "uMotionFrame",
@@ -475,6 +609,15 @@ export class SchwarzschildRenderer {
     gl.bindVertexArray(this.vao);
     gl.useProgram(program);
     gl.uniform1i(this.uniforms.uSky, 0);
+    gl.useProgram(xrProgram);
+    gl.uniform1i(this.xrUniforms.uSky, 0);
+    gl.uniform1i(this.xrUniforms.uRayTransfer, 1);
+    gl.uniform1i(this.xrUniforms.uPhotonCrossing, 2);
+    gl.uniform2f(
+      this.xrUniforms.uTransferRhoRange,
+      transferTable.rhoMin,
+      transferTable.rhoMax,
+    );
     gl.useProgram(fxaaProgram);
     gl.uniform1i(this.fxaaUniforms.uCurrentFrame, 1);
     gl.uniform1i(this.fxaaUniforms.uHistoryFrame, 2);
@@ -623,7 +766,7 @@ export class SchwarzschildRenderer {
     if (this.gl.isContextLost() || !this.xrLayer) return false;
 
     const gl = this.gl;
-    const u = this.uniforms;
+    const u = this.xrUniforms;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.xrLayer.framebuffer);
     gl.disable(gl.BLEND);
     gl.disable(gl.DEPTH_TEST);
@@ -631,21 +774,20 @@ export class SchwarzschildRenderer {
     gl.enable(gl.DITHER);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.useProgram(this.program);
+    gl.useProgram(this.xrProgram);
     gl.bindVertexArray(this.vao);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.skyTexture);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.transferTable.transferTexture);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.transferTable.crossingTexture);
 
-    gl.uniform1i(u.uXRView, 1);
     gl.uniform1f(u.uTime, timeSeconds);
     gl.uniform1f(u.uStationRotationSpeed, settings.stationRotationSpeed);
-    gl.uniform1i(u.uMaxSteps, settings.maxSteps);
-    gl.uniform1f(u.uBaseStep, settings.baseStep);
     gl.uniform1i(u.uLensing, settings.lensing ? 1 : 0);
-    gl.uniform1i(u.uSpheresVisible, 0);
     gl.uniform1i(u.uSkyVisible, settings.skyVisible ? 1 : 0);
     gl.uniform1i(u.uRingsVisible, settings.ringsVisible ? 1 : 0);
-    gl.uniform1i(u.uShellCount, 0);
     gl.uniform1f(u.uExposure, settings.exposure);
     gl.uniform1f(u.uSaturation, settings.saturation);
 
@@ -663,9 +805,6 @@ export class SchwarzschildRenderer {
       gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
       gl.uniform2f(u.uResolution, viewport.width, viewport.height);
       gl.uniform3fv(u.uCameraPosition, state.position);
-      gl.uniform3fv(u.uCameraForward, state.forward);
-      gl.uniform3fv(u.uCameraRight, state.right);
-      gl.uniform3fv(u.uCameraUp, state.up);
       gl.uniform1f(u.uFovY, state.fovY);
       gl.uniformMatrix4fv(
         u.uInverseProjection,
@@ -677,7 +816,6 @@ export class SchwarzschildRenderer {
       if (gl.isContextLost()) return false;
     }
 
-    gl.uniform1i(u.uXRView, 0);
     this.xrFrameStats = {
       viewCount,
       totalPixels,
@@ -685,6 +823,7 @@ export class SchwarzschildRenderer {
       maxHeight,
     };
     gl.disable(gl.DITHER);
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     return true;
   }
